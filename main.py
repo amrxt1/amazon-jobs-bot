@@ -3,13 +3,15 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+
+from dotenv import load_dotenv
+import traceback
 import requests
 import time
 import yaml
 import os
-from dotenv import load_dotenv
-
-LOGIN_URL = "https://auth.hiring.amazon.com/#/login"
 
 
 def telegram(link):
@@ -48,20 +50,56 @@ def initialize():
     return config, driver
 
 
+def login(driver, cfg):
+    print("Navigating to login page...")
+    driver.get(cfg["url"]["login_url"])
+    WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located(
+            (
+                By.XPATH,
+                "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button",
+            )
+        )
+    )
+    consent = driver.find_element(
+        By.XPATH,
+        "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button",
+    )
+    consent.click()
+    print("Clicked consent")
+
+    # WebDriverWait(driver, 10).until(
+    #     EC.visibility_of_element_located(
+    #         (By.CSS_SELECTOR, cfg["selectors"]["login"]["country_input"])
+    #     )
+    # )
+    # print("Found country selection")
+    # country_input = driver.find_element(
+    #     By.CSS_SELECTOR, cfg["selectors"]["login"]["country_input"]
+    # )
+    # country_input.click()
+    driver.quit()
+    return -1
+
+
 def main():
     cfg, drv = initialize()
     try:
-        drv.get(cfg["url"]["login_url"])
         # FLOW
         # Login
+        print("\n\tSTEP1. LOGIN:")
+        login(drv, cfg)
         # prompt for otp
         # start checking
         # go to the job page, if there is one
         # select a shift
         # create application
         # NOTIFY
+        print("\nSuccessful run!!")
     except Exception as e:
-        print(e)
+        print("Something ain't right\nTraceback:\n")
+        # print(e)
+        traceback.print_exc()
     finally:
         drv.quit()
 
