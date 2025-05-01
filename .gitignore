@@ -1,2 +1,5 @@
 #Ignore env configuration
 .env
+
+#config
+config.yml
