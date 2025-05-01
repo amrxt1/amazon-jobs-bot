@@ -30,11 +30,32 @@ def telegram(link):
 def build_driver(chromedriver_path, isHeadless, windowSize):
     options = Options()
     options.add_argument(f"--window-size={windowSize}")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/136.0.0.0 Safari/537.36"
+    )
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("useAutomationExtension", False)
+    options.add_argument("--disable-blink-features=AutomationControlled")
+
     if isHeadless:
         options.add_argument("--headless")
-    return webdriver.Chrome(
+    driver = webdriver.Chrome(
         service=Service(executable_path=chromedriver_path), options=options
     )
+    driver.execute_cdp_cmd(
+        "Page.addScriptToEvaluateOnNewDocument",
+        {
+            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+        },
+    )
+    driver.execute_cdp_cmd(
+        "Network.setExtraHTTPHeaders",
+        {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
+    )
+
+    return driver
 
 
 def initialize():
@@ -46,6 +67,10 @@ def initialize():
         config["chrome"]["headless"],
         config["chrome"]["window_size"],
     )
+    driver.execute_cdp_cmd(
+        "Network.setExtraHTTPHeaders",
+        {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
+    )
 
     return config, driver
 
@@ -53,6 +78,8 @@ def initialize():
 def login(driver, cfg):
     print("Navigating to login page...")
     driver.get(cfg["url"]["login_url"])
+
+    # Look for and click on consent
     WebDriverWait(driver, 10).until(
         EC.presence_of_element_located(
             (
@@ -61,13 +88,13 @@ def login(driver, cfg):
             )
         )
     )
-    consent = driver.find_element(
+    driver.find_element(
         By.XPATH,
         "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button",
-    )
-    consent.click()
+    ).click()
     print("Clicked consent")
 
+    # Uncomment if need to select a country
     # WebDriverWait(driver, 10).until(
     #     EC.visibility_of_element_located(
     #         (By.CSS_SELECTOR, cfg["selectors"]["login"]["country_input"])
@@ -78,7 +105,52 @@ def login(driver, cfg):
     #     By.CSS_SELECTOR, cfg["selectors"]["login"]["country_input"]
     # )
     # country_input.click()
-    driver.quit()
+
+    # enter email
+    WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, '//*[@id="login"]'))
+    )
+    email = driver.find_element(By.CSS_SELECTOR, "#login")
+    email.click()
+    email.send_keys(cfg["creds"]["email"])
+    print("Entered email")
+    driver.find_element(
+        By.XPATH, '//*[@id="pageRouter"]/div/div/div[2]/div[1]/button'
+    ).click()
+    print("Prompting PIN")
+    print("entered PIN\n")
+
+    # enter PIN
+    WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, '//*[@id="pin"]'))
+    )
+    pin = driver.find_element(By.CSS_SELECTOR, "#pin")
+    pin.click()
+    pin.send_keys(cfg["creds"]["pin"])
+    driver.find_element(By.XPATH, '//*[@id="pageRouter"]/div/div/div/button').click()
+    print("Prompting OTP")
+    time.sleep(5)
+    driver.find_element(By.XPATH, '//*[@id="pageRouter"]/div/div/div/button').click()
+
+    # solve captchas and recieve otp
+    print("Captcha should be on the screen now. Please solve it in the browser.")
+    print("When you have finished the captcha, Check your email for OTP.")
+    otp = input("Enter the OTP, then press ↵ Enter to continue.\n\n> ")
+
+    # look for otp input
+    WebDriverWait(driver, 300).until(
+        EC.visibility_of_element_located(
+            (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
+        )
+    )
+
+    otp_input = driver.find_element(
+        By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]'
+    )
+    otp_input.click()
+    otp_input.send_keys(otp)
+
+    time.sleep(200)
     return -1
 
 
