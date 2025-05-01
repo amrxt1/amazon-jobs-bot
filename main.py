@@ -15,16 +15,10 @@ import os
 
 
 def telegram(link):
-    body = f"Go to: {'some prefix' + link}"
-
-    print("Sending to TELEGRAM")
-
+    body = f"New Amazon job posted:\n{link}"
     url = os.getenv("URL")
     params = {"chat_id": os.getenv("CHAT_ID"), "text": body}
-    r = requests.get(url + "/sendMessage", params=params)
-
-    print(r.url)
-    print("Sent on TELEGRAM")
+    requests.get(url + "/sendMessage", params=params)
 
 
 def build_driver(chromedriver_path, isHeadless, windowSize):
@@ -76,6 +70,7 @@ def initialize():
 
 
 def login(driver, cfg):
+    print("\t\tLogging in...")
     print("Navigating to login page...")
     driver.get(cfg["url"]["login_url"])
 
@@ -92,7 +87,7 @@ def login(driver, cfg):
         By.XPATH,
         "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button",
     ).click()
-    print("Clicked consent")
+    print("Gained consent!")
 
     # Uncomment if need to select a country
     # WebDriverWait(driver, 10).until(
@@ -113,22 +108,22 @@ def login(driver, cfg):
     email = driver.find_element(By.CSS_SELECTOR, "#login")
     email.click()
     email.send_keys(cfg["creds"]["email"])
-    print("Entered email")
+    print("Email entered!")
     driver.find_element(
         By.XPATH, '//*[@id="pageRouter"]/div/div/div[2]/div[1]/button'
     ).click()
-    print("Prompting PIN")
-    print("entered PIN\n")
+    print("Approaching PIN...")
 
-    # enter PIN
+    # enter PIN        print("\t\tLogging in...")
     WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.XPATH, '//*[@id="pin"]'))
     )
     pin = driver.find_element(By.CSS_SELECTOR, "#pin")
     pin.click()
     pin.send_keys(cfg["creds"]["pin"])
+    print("PIN entered!")
     driver.find_element(By.XPATH, '//*[@id="pageRouter"]/div/div/div/button').click()
-    print("Prompting OTP")
+    print("Approaching OTP...")
     time.sleep(5)
     driver.find_element(By.XPATH, '//*[@id="pageRouter"]/div/div/div/button').click()
 
@@ -136,7 +131,6 @@ def login(driver, cfg):
     print("Captcha should be on the screen now. Please solve it in the browser.")
     print("When you have finished the captcha, Check your email for OTP.")
     otp = input("Enter the OTP, then press ↵ Enter to continue.\n\n> ")
-
     # look for otp input
     WebDriverWait(driver, 300).until(
         EC.visibility_of_element_located(
@@ -149,31 +143,125 @@ def login(driver, cfg):
     )
     otp_input.click()
     otp_input.send_keys(otp)
+    print("OTP entered!")
 
-    time.sleep(200)
     return -1
 
 
+def fetch_jobs(driver):
+    print("\nFetching for jobs...")
+    token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
+    if not token:
+        raise RuntimeError("sessionToken not found in localStorage")
+
+    # GraphQL request
+    url = (
+        "https://e5mquma77feepi2bdn4d6h3mpu.appsync-api.us-east-1.amazonaws.com/graphql"
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "Authorization": f"Bearer {token}",
+        "Country": "United States",
+    }
+    body = {
+        "operationName": "searchJobCardsByLocation",
+        "variables": {
+            "searchJobRequest": {
+                "locale": "en-US",
+                "country": "United States",
+                "keyWords": "",
+                "equalFilters": [
+                    {"key": "shiftType", "val": "All"},
+                    {"key": "scheduleRequiredLanguage", "val": "en-US"},
+                ],
+                "containFilters": [
+                    {"key": "isPrivateSchedule", "val": ["false"]},
+                    {
+                        "key": "jobTitle",
+                        "val": [
+                            "Amazon Fulfillment Center Warehouse Associate",
+                            "Amazon Sortation Center Warehouse Associate",
+                            "Amazon Delivery Station Warehouse Associate",
+                            "Amazon Distribution Center Associate",
+                            "Amazon Grocery Warehouse Associate",
+                            "Amazon Air Associate",
+                            "Amazon Warehouse Team Member",
+                            "Amazon XL Warehouse Associate",
+                        ],
+                    },
+                ],
+                "rangeFilters": [
+                    {"key": "hoursPerWeek", "range": {"minimum": 0, "maximum": 80}}
+                ],
+                "dateFilters": [
+                    {"key": "firstDayOnSite", "range": {"startDate": "2025-05-01"}}
+                ],
+                "sorters": [{"fieldName": "totalPayRateMax", "ascending": "false"}],
+                "pageSize": 100,
+                "consolidateSchedule": True,
+            }
+        },
+        "query": """
+          query searchJobCardsByLocation($searchJobRequest: SearchJobRequest!) {
+            searchJobCardsByLocation(searchJobRequest: $searchJobRequest) {
+              jobCards {
+                jobId
+                jobTitle
+                city
+                state
+                totalPayRateMax
+              }
+            }
+          }
+        """,
+    }
+    print("Built request...")
+    resp = requests.post(url, headers=headers, json=body)
+    resp.raise_for_status()
+    data = resp.json()["data"]["searchJobCardsByLocation"]["jobCards"]
+    print("Response recieved...\n")
+    return data
+
+
 def main():
-    cfg, drv = initialize()
+    cfg, driver = initialize()
+
     try:
-        # FLOW
-        # Login
-        print("\n\tSTEP1. LOGIN:")
-        login(drv, cfg)
-        # prompt for otp
-        # start checking
-        # go to the job page, if there is one
-        # select a shift
-        # create application
-        # NOTIFY
-        print("\nSuccessful run!!")
-    except Exception as e:
-        print("Something ain't right\nTraceback:\n")
-        # print(e)
+        login(driver, cfg)
+
+        seen = set()
+        interval = cfg["interval"]
+
+        print(f"\nFetching every {interval}s for new jobs…")
+        while True:
+            try:
+                jobs = fetch_jobs(driver)
+            except Exception:
+                # if token expired or network error, re-login
+                print("Fetch failed. Logging in...")
+                login(driver, cfg)
+                jobs = fetch_jobs(driver)
+
+            for job in jobs:
+                jid = job["jobId"]
+                if jid not in seen:
+                    seen.add(jid)
+                    link = f"https://hiring.amazon.com/app#/jobDetail?jobId={jid}"
+                    telegram(link)
+                    print(f"\tSent: {link}")
+
+            print(f"Sleeping for {interval}s…\n")
+            time.sleep(interval)
+
+    except KeyboardInterrupt:
+        print("\n\nGracefully Exiting...")
+    except Exception:
+        print("\n\n\tGAME \tO V E R")
         traceback.print_exc()
     finally:
-        drv.quit()
+        driver.quit()
 
 
-main()
+if __name__ == "__main__":
+    main()
