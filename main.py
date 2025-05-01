@@ -1,5 +1,4 @@
 from selenium import webdriver
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -90,18 +89,6 @@ def login(driver, cfg):
     ).click()
     print("Gained consent!")
 
-    # Uncomment if need to select a country
-    # WebDriverWait(driver, 10).until(
-    #     EC.visibility_of_element_located(
-    #         (By.CSS_SELECTOR, cfg["selectors"]["login"]["country_input"])
-    #     )
-    # )
-    # print("Found country selection")
-    # country_input = driver.find_element(
-    #     By.CSS_SELECTOR, cfg["selectors"]["login"]["country_input"]
-    # )
-    # country_input.click()
-
     # enter email
     WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.XPATH, '//*[@id="login"]'))
@@ -115,7 +102,7 @@ def login(driver, cfg):
     ).click()
     print("Approaching PIN...")
 
-    # enter PIN        print("\t\tLogging in...")
+    # enter PIN
     WebDriverWait(driver, 10).until(
         EC.presence_of_element_located((By.XPATH, '//*[@id="pin"]'))
     )
@@ -332,6 +319,55 @@ def fetch_jobs_ca(driver, cfg):
     return data
 
 
+def get_job_schedules_us(driver, jobId, cfg):
+    print(f"\nFetching for Job Schedule for: {jobId}")
+    token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
+    if not token:
+        raise RuntimeError("sessionToken not found in localStorage")
+
+    # GraphQL request
+    url = (
+        "https://e5mquma77feepi2bdn4d6h3mpu.appsync-api.us-east-1.amazonaws.com/graphql"
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "Authorization": f"Bearer {token}",
+        "Country": "United States",
+    }
+    body = {
+        "operationName": "searchScheduleCards",
+        "variables": {
+            "searchScheduleRequest": {
+                "locale": "en-US",
+                "country": "United States",
+                "keyWords": "",
+                "equalFilters": [],
+                "containFilters": [{"key": "isPrivateSchedule", "val": ["false"]}],
+                "rangeFilters": [
+                    {"key": "hoursPerWeek", "range": {"minimum": 0, "maximum": 80}}
+                ],
+                "orFilters": [],
+                "dateFilters": [
+                    {"key": "firstDayOnSite", "range": {"startDate": "2025-05-01"}}
+                ],
+                "sorters": [{"fieldName": "totalPayRateMax", "ascending": "false"}],
+                "pageSize": 1000,
+                "jobId": jobId,
+                "consolidateSchedule": True,
+            }
+        },
+        "query": "query searchScheduleCards($searchScheduleRequest: SearchScheduleRequest!) {\n  searchScheduleCards(searchScheduleRequest: $searchScheduleRequest) {\n    nextToken\n    scheduleCards {\n      hireStartDate\n      address\n      basePay\n      bonusSchedule\n      city\n      currencyCode\n      dataSource\n      distance\n      employmentType\n      externalJobTitle\n      featuredSchedule\n      firstDayOnSite\n      hoursPerWeek\n      image\n      jobId\n      jobPreviewVideo\n      language\n      postalCode\n      priorityRank\n      scheduleBannerText\n      scheduleId\n      scheduleText\n      scheduleType\n      signOnBonus\n      state\n      surgePay\n      tagLine\n      geoClusterId\n      geoClusterName\n      siteId\n      scheduleBusinessCategory\n      totalPayRate\n      financeWeekStartDate\n      laborDemandAvailableCount\n      scheduleBusinessCategoryL10N\n      firstDayOnSiteL10N\n      financeWeekStartDateL10N\n      scheduleTypeL10N\n      employmentTypeL10N\n      basePayL10N\n      signOnBonusL10N\n      totalPayRateL10N\n      distanceL10N\n      requiredLanguage\n      monthlyBasePay\n      monthlyBasePayL10N\n      vendorKamName\n      vendorId\n      vendorName\n      kamPhone\n      kamCorrespondenceEmail\n      kamStreet\n      kamCity\n      kamDistrict\n      kamState\n      kamCountry\n      kamPostalCode\n      __typename\n    }\n    __typename\n  }\n}\n",
+    }
+    print("Built request...")
+    resp = requests.post(url, headers=headers, json=body)
+    resp.raise_for_status()
+    data = resp.json()["data"]["searchScheduleCards"]["scheduleCards"]
+    print("Schedules recieved...\n")
+    print()
+    return data
+
+
 def main():
     cfg, driver = initialize()
 
@@ -346,19 +382,23 @@ def main():
             try:
                 jobs = fetch_jobs_us(driver, cfg)
             except Exception:
-                # if token expired or network error, re-login
                 print("Fetch failed. Logging in...")
                 login(driver, cfg)
                 jobs = fetch_jobs_us(driver, cfg)
-
-            for job in jobs:
-                jid = job["jobId"]
+            if jobs:
+                jid = jobs[0]["jobId"]
                 if jid not in seen:
                     seen.add(jid)
-                    link = f"https://hiring.amazon.com/app#/jobDetail?jobId={jid}"
-                    telegram(link)
-                    print(f"\tSent: {link}")
-
+                    schedules = get_job_schedules_us(driver, jid, cfg)
+                    if schedules:
+                        schedule_id = schedules[0]["scheduleId"]
+                        link_to_apply = (
+                            f"https://hiring.amazon.com/application/us/?jobId={jid}"
+                            f"&scheduleId={schedule_id}#/pre-consent?"
+                            f"jobId={jid}&scheduleId={schedule_id}"
+                        )
+                        telegram(link_to_apply)
+                        driver.get(link_to_apply)
             print(f"Sleeping for {interval}s…\n")
             time.sleep(interval)
 
