@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 import traceback
 import requests
 import time
+import json
 import yaml
 import os
 
@@ -148,7 +149,7 @@ def login(driver, cfg):
     return -1
 
 
-def fetch_jobs(driver):
+def fetch_jobs_us(driver, cfg):
     print("\nFetching for jobs...")
     token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
     if not token:
@@ -221,6 +222,113 @@ def fetch_jobs(driver):
     resp.raise_for_status()
     data = resp.json()["data"]["searchJobCardsByLocation"]["jobCards"]
     print("Response recieved...\n")
+    print(data[0])
+    return data
+
+
+def fetch_jobs_ca(driver, cfg):
+    print("\nFetching for jobs…")
+
+    token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
+    if not token:
+        raise RuntimeError("sessionToken not found in localStorage")
+
+    raw_geo = driver.execute_script("return window.localStorage.getItem('geoInfo')")
+    if raw_geo:
+        geo = json.loads(raw_geo)
+        lat = geo.get("lat")
+        lng = geo.get("lng")
+    else:
+        lat = cfg["location"]["lat"]
+        lng = cfg["location"]["lng"]
+
+    url = (
+        "https://e5mquma77feepi2bdn4d6h3mpu.appsync-api.us-east-1.amazonaws.com/graphql"
+    )
+
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": "*/*",
+        "Authorization": f"Bearer {token}",
+        "Country": "Canada",
+    }
+
+    body = {
+        "operationName": "searchJobCardsByLocation",
+        "variables": {
+            "searchJobRequest": {
+                "locale": "en-CA",
+                "country": "Canada",
+                "pageSize": 100,
+                "geoQueryClause": {
+                    "lat": lat,
+                    "lng": lng,
+                    "unit": "km",
+                    "distance": 100,
+                },
+                "dateFilters": [
+                    {"key": "firstDayOnSite", "range": {"startDate": "2025-05-01"}}
+                ],
+            }
+        },
+        "query": """
+          query searchJobCardsByLocation($searchJobRequest: SearchJobRequest!) {
+            searchJobCardsByLocation(searchJobRequest: $searchJobRequest) {
+              nextToken
+              jobCards {
+                jobId
+                language
+                dataSource
+                requisitionType
+                jobTitle
+                jobType
+                employmentType
+                city
+                state
+                postalCode
+                locationName
+                totalPayRateMin
+                totalPayRateMax
+                tagLine
+                bannerText
+                image
+                jobPreviewVideo
+                distance
+                featuredJob
+                bonusJob
+                bonusPay
+                scheduleCount
+                currencyCode
+                geoClusterDescription
+                surgePay
+                jobTypeL10N
+                employmentTypeL10N
+                bonusPayL10N
+                surgePayL10N
+                totalPayRateMinL10N
+                totalPayRateMaxL10N
+                distanceL10N
+                monthlyBasePayMin
+                monthlyBasePayMinL10N
+                monthlyBasePayMax
+                monthlyBasePayMaxL10N
+                jobContainerJobMetaL1
+                virtualLocation
+                poolingEnabled
+                __typename
+              }
+              __typename
+            }
+          }
+        """,
+    }
+
+    resp = requests.post(url, headers=headers, json=body)
+    resp.raise_for_status()
+
+    data = resp.json()["data"]["searchJobCardsByLocation"]["jobCards"]
+    print("Response received…\n")
+    print(data[0])
     return data
 
 
@@ -236,12 +344,12 @@ def main():
         print(f"\nFetching every {interval}s for new jobs…")
         while True:
             try:
-                jobs = fetch_jobs(driver)
+                jobs = fetch_jobs_us(driver, cfg)
             except Exception:
                 # if token expired or network error, re-login
                 print("Fetch failed. Logging in...")
                 login(driver, cfg)
-                jobs = fetch_jobs(driver)
+                jobs = fetch_jobs_us(driver, cfg)
 
             for job in jobs:
                 jid = job["jobId"]
