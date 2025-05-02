@@ -1,12 +1,9 @@
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 import undetected_chromedriver as uc
 
-from urllib.parse import urlencode, quote
 from dotenv import load_dotenv
 import traceback
 import requests
@@ -136,11 +133,8 @@ def login(driver, cfg):
     return -1
 
 
-def fetch_jobs_us(driver, cfg):
-    print("\nFetching for jobs...")
-    token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
-    if not token:
-        raise RuntimeError("sessionToken not found in localStorage")
+def fetch_jobs_us():
+    print("\nFetching for jobs( US )...")
 
     # GraphQL request
     url = (
@@ -149,8 +143,8 @@ def fetch_jobs_us(driver, cfg):
     headers = {
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "Authorization": f"Bearer {token}",
         "Country": "United States",
+        "authorization": "Bearer Status|unauthenticated|",
     }
     body = {
         "operationName": "searchJobCardsByLocation",
@@ -213,33 +207,22 @@ def fetch_jobs_us(driver, cfg):
     return data
 
 
-def fetch_jobs_ca(driver, cfg):
-    print("\nFetching for jobs…")
+def fetch_jobs_ca(cfg):
+    print("\nFetching for jobs( CA )…")
 
-    token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
-    if not token:
-        raise RuntimeError("sessionToken not found in localStorage")
-
-    raw_geo = driver.execute_script("return window.localStorage.getItem('geoInfo')")
-    if raw_geo:
-        geo = json.loads(raw_geo)
-        lat = geo.get("lat")
-        lng = geo.get("lng")
-    else:
-        lat = cfg["location"]["lat"]
-        lng = cfg["location"]["lng"]
+    # van coordinates
+    lat = cfg["location"]["lat"]
+    lng = cfg["location"]["lng"]
 
     url = (
         "https://e5mquma77feepi2bdn4d6h3mpu.appsync-api.us-east-1.amazonaws.com/graphql"
     )
-
     headers = {
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "Authorization": f"Bearer {token}",
+        "authorization": "Bearer Status|unauthenticated|Session|",
         "Country": "Canada",
     }
-
     body = {
         "operationName": "searchJobCardsByLocation",
         "variables": {
@@ -251,7 +234,7 @@ def fetch_jobs_ca(driver, cfg):
                     "lat": lat,
                     "lng": lng,
                     "unit": "km",
-                    "distance": 100,
+                    "distance": 150,
                 },
                 "dateFilters": [
                     {"key": "firstDayOnSite", "range": {"startDate": "2025-05-01"}}
@@ -315,15 +298,15 @@ def fetch_jobs_ca(driver, cfg):
 
     data = resp.json()["data"]["searchJobCardsByLocation"]["jobCards"]
     print("Response received…\n")
-    print(data[0])
+    if data:
+        print(data[0])
+    else:
+        print("No Jobs Posted")
     return data
 
 
-def get_job_schedules_us(driver, jobId, cfg):
+def get_job_schedules_us(jobId):
     print(f"\nFetching for Job Schedule for: {jobId}")
-    token = driver.execute_script("return window.localStorage.getItem('sessionToken')")
-    if not token:
-        raise RuntimeError("sessionToken not found in localStorage")
 
     # GraphQL request
     url = (
@@ -332,7 +315,7 @@ def get_job_schedules_us(driver, jobId, cfg):
     headers = {
         "Content-Type": "application/json",
         "Accept": "*/*",
-        "Authorization": f"Bearer {token}",
+        "authorization": "Bearer Status|unauthenticated|Session|",
         "Country": "United States",
     }
     body = {
@@ -359,99 +342,29 @@ def get_job_schedules_us(driver, jobId, cfg):
         },
         "query": "query searchScheduleCards($searchScheduleRequest: SearchScheduleRequest!) {\n  searchScheduleCards(searchScheduleRequest: $searchScheduleRequest) {\n    nextToken\n    scheduleCards {\n      hireStartDate\n      address\n      basePay\n      bonusSchedule\n      city\n      currencyCode\n      dataSource\n      distance\n      employmentType\n      externalJobTitle\n      featuredSchedule\n      firstDayOnSite\n      hoursPerWeek\n      image\n      jobId\n      jobPreviewVideo\n      language\n      postalCode\n      priorityRank\n      scheduleBannerText\n      scheduleId\n      scheduleText\n      scheduleType\n      signOnBonus\n      state\n      surgePay\n      tagLine\n      geoClusterId\n      geoClusterName\n      siteId\n      scheduleBusinessCategory\n      totalPayRate\n      financeWeekStartDate\n      laborDemandAvailableCount\n      scheduleBusinessCategoryL10N\n      firstDayOnSiteL10N\n      financeWeekStartDateL10N\n      scheduleTypeL10N\n      employmentTypeL10N\n      basePayL10N\n      signOnBonusL10N\n      totalPayRateL10N\n      distanceL10N\n      requiredLanguage\n      monthlyBasePay\n      monthlyBasePayL10N\n      vendorKamName\n      vendorId\n      vendorName\n      kamPhone\n      kamCorrespondenceEmail\n      kamStreet\n      kamCity\n      kamDistrict\n      kamState\n      kamCountry\n      kamPostalCode\n      __typename\n    }\n    __typename\n  }\n}\n",
     }
+
     print("Built request...")
     resp = requests.post(url, headers=headers, json=body)
     resp.raise_for_status()
     data = resp.json()["data"]["searchScheduleCards"]["scheduleCards"]
     print("Schedules recieved...\n")
-    print()
+    if data:
+        print(
+            f"Recieved at least one schedule.\nFirstScheduleID: {data[0]['scheduleId']}\n"
+        )
+    else:
+        print("No schedules recieved.")
     return data
-
-
-def click_element_by_xpath(driver, xpath, timeout=10):
-    element = WebDriverWait(driver, timeout).until(
-        EC.element_to_be_clickable((By.XPATH, xpath))
-    )
-    element.click()
-
-
-def build_application_url(job_id, schedule_id, token):
-    base_url = "https://hiring.amazon.com/application/"
-    params = {
-        "page": "pre-consent",
-        "jobId": job_id,
-        "scheduleId": schedule_id,
-        "CS": "true",
-        "locale": "en-US",
-        "token": token,
-        "ssoEnabled": "1",
-    }
-    return f"{base_url}?{urlencode(params, quote_via=quote)}"
-
-
-def sync_cookies_to_requests(driver, session):
-    for cookie in driver.get_cookies():
-        session.cookies.set(cookie["name"], cookie["value"])
 
 
 def main():
     cfg, driver = initialize()
-
-    try:
-        login(driver, cfg)
-
-        seen = set()
-        interval = cfg["interval"]
-
-        print(f"\nFetching every {interval}s for new jobs…")
-        while True:
-            try:
-                jobs = fetch_jobs_us(driver, cfg)
-            except Exception:
-                print("Fetch failed. Logging in...")
-                login(driver, cfg)
-                jobs = fetch_jobs_us(driver, cfg)
-            if jobs:
-                jid = jobs[0]["jobId"]
-                if jid not in seen:
-                    seen.add(jid)
-                    schedules = get_job_schedules_us(driver, jid, cfg)
-                    if schedules:
-                        schedule_id = schedules[0]["scheduleId"]
-                        token = driver.execute_script(
-                            "return window.localStorage.getItem('accessToken')"
-                        )
-
-                        time.sleep(7)
-
-                        print("Navigating to the first schedule apply page")
-                        driver.get(build_application_url(jid, schedule_id, token))
-
-                        driver.execute_script("""
-                        fetch('/application/api/candidate-application/candidate', {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'application/json, text/plain, */*',
-                            'Authorization': localStorage.getItem('accessToken'),
-                            'bb-ui-version': 'bb-ui-v2'
-                        },
-                        credentials: 'include'
-                        }).then(res => res.json()).then(console.log);
-                        """)
-
-            print(f"Sleeping for {interval}s…\n")
-            time.sleep(interval)
-
-    except KeyboardInterrupt:
-        print("\n\nGracefully Exiting...")
-    except Exception:
-        print("\n\n\tGAME \tO V E R")
-        traceback.print_exc()
-
-        print("Try to debug ill give you some time")
-        time.sleep(1000000)
-    finally:
-        driver.quit()
+    jid = fetch_jobs_us()[0]
+    fetch_jobs_ca(cfg)
+    fetch_jobs_us()
+    print(len(get_job_schedules_us(jid["jobId"])))
+    time.sleep(90)
+    driver.quit()
 
 
 if __name__ == "__main__":
