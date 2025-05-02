@@ -1,10 +1,12 @@
-from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+import undetected_chromedriver as uc
+
+from urllib.parse import urlencode, quote
 from dotenv import load_dotenv
 import traceback
 import requests
@@ -22,32 +24,30 @@ def telegram(link):
 
 
 def build_driver(chromedriver_path, isHeadless, windowSize):
-    options = Options()
-    options.add_argument(f"--window-size={windowSize}")
-    options.add_argument(
-        "user-agent=Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/136.0.0.0 Safari/537.36"
-    )
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option("useAutomationExtension", False)
-    options.add_argument("--disable-blink-features=AutomationControlled")
+    # options = Options()
+    # options.add_argument(f"--window-size={windowSize}")
+    # options.add_argument(
+    #     "user-agent=Mozilla/5.0 (X11; Linux x86_64) "
+    #     "AppleWebKit/537.36 (KHTML, like Gecko) "
+    #     "Chrome/136.0.0.0 Safari/537.36"
+    # )
+    # options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    # options.add_experimental_option("useAutomationExtension", False)
+    # options.add_argument("--disable-blink-features=AutomationControlled")
 
-    if isHeadless:
-        options.add_argument("--headless")
-    driver = webdriver.Chrome(
-        service=Service(executable_path=chromedriver_path), options=options
-    )
-    driver.execute_cdp_cmd(
-        "Page.addScriptToEvaluateOnNewDocument",
-        {
-            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        },
-    )
-    driver.execute_cdp_cmd(
-        "Network.setExtraHTTPHeaders",
-        {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
-    )
+    # if isHeadless:
+    #     options.add_argument("--headless")
+    driver = uc.Chrome(use_subprocess=False)
+    # driver.execute_cdp_cmd(
+    #     "Page.addScriptToEvaluateOnNewDocument",
+    #     {
+    #         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    #     },
+    # )
+    # driver.execute_cdp_cmd(
+    #     "Network.setExtraHTTPHeaders",
+    #     {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
+    # )
 
     return driver
 
@@ -368,6 +368,32 @@ def get_job_schedules_us(driver, jobId, cfg):
     return data
 
 
+def click_element_by_xpath(driver, xpath, timeout=10):
+    element = WebDriverWait(driver, timeout).until(
+        EC.element_to_be_clickable((By.XPATH, xpath))
+    )
+    element.click()
+
+
+def build_application_url(job_id, schedule_id, token):
+    base_url = "https://hiring.amazon.com/application/"
+    params = {
+        "page": "pre-consent",
+        "jobId": job_id,
+        "scheduleId": schedule_id,
+        "CS": "true",
+        "locale": "en-US",
+        "token": token,
+        "ssoEnabled": "1",
+    }
+    return f"{base_url}?{urlencode(params, quote_via=quote)}"
+
+
+def sync_cookies_to_requests(driver, session):
+    for cookie in driver.get_cookies():
+        session.cookies.set(cookie["name"], cookie["value"])
+
+
 def main():
     cfg, driver = initialize()
 
@@ -392,13 +418,27 @@ def main():
                     schedules = get_job_schedules_us(driver, jid, cfg)
                     if schedules:
                         schedule_id = schedules[0]["scheduleId"]
-                        link_to_apply = (
-                            f"https://hiring.amazon.com/application/us/?jobId={jid}"
-                            f"&scheduleId={schedule_id}#/pre-consent?"
-                            f"jobId={jid}&scheduleId={schedule_id}"
+                        token = driver.execute_script(
+                            "return window.localStorage.getItem('accessToken')"
                         )
-                        telegram(link_to_apply)
-                        driver.get(link_to_apply)
+
+                        time.sleep(7)
+
+                        print("Navigating to the first schedule apply page")
+                        driver.get(build_application_url(jid, schedule_id, token))
+
+                        driver.execute_script("""
+                        fetch('/application/api/candidate-application/candidate', {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'application/json, text/plain, */*',
+                            'Authorization': localStorage.getItem('accessToken'),
+                            'bb-ui-version': 'bb-ui-v2'
+                        },
+                        credentials: 'include'
+                        }).then(res => res.json()).then(console.log);
+                        """)
+
             print(f"Sleeping for {interval}s…\n")
             time.sleep(interval)
 
@@ -407,6 +447,9 @@ def main():
     except Exception:
         print("\n\n\tGAME \tO V E R")
         traceback.print_exc()
+
+        print("Try to debug ill give you some time")
+        time.sleep(1000000)
     finally:
         driver.quit()
 
