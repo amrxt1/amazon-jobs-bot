@@ -4,8 +4,11 @@ The Job Polling object.
 
 """
 
-import requests
+from datetime import datetime
+from typing import List, Dict
+
 from datetime import date
+import requests
 
 
 class JobPoller:
@@ -222,7 +225,6 @@ class JobPoller:
 
         print("Schedules recieved...\n")
         data = self.graphQL(body=body, headers=self.headers_us)
-        print(data)
         data = data["data"]["searchScheduleCards"]["scheduleCards"]
         if data:
             print("Response recieved...\n")
@@ -232,6 +234,65 @@ class JobPoller:
             print("Response empty")
             return []
 
+    def score_schedules(
+        self,
+        schedules: List[Dict],
+        weights: Dict[str, float] = None,
+        date_window_days: int = 30,
+    ) -> List[Dict]:
+        """
+        Given a list of schedule objects , return a new list where each
+        dict has an extra 'score' key. Higher is better.
+        """
+
+        if weights is None:
+            weights = {"pay": 0.5, "soon": 0.3, "hours": 0.1, "avail": 0.1}
+        today = datetime.now().date()
+
+        # prep for normalization
+        max_pay = max(s["totalPayRate"] for s in schedules)
+        max_avail = max((s.get("laborDemandAvailableCount") or 0) for s in schedules)
+
+        scored = []
+        for s in schedules:
+            # normalized 0–1
+            pay_norm = (s["totalPayRate"] / max_pay) if max_pay else 0
+
+            try:
+                first_day = datetime.fromisoformat(s["firstDayOnSite"]).date()
+                delta = (first_day - today).days
+            except Exception:
+                delta = date_window_days + 1
+            # inverted cause less is more
+            soon_norm = max(0.0, (date_window_days - delta) / date_window_days)
+
+            hours_norm = min(s["hoursPerWeek"] / 40.0, 1.0)
+
+            avail_norm = (
+                (s.get("laborDemandAvailableCount") or 0) / max_avail
+                if max_avail
+                else 0
+            )
+
+            # combined score
+            score = (
+                pay_norm * weights["pay"]
+                + soon_norm * weights["soon"]
+                + hours_norm * weights["hours"]
+                + avail_norm * weights["avail"]
+            )
+
+            scored.append({**s, "score": score})
+
+        return scored
+
 
 obj = JobPoller()
-print(obj.get_job_schedules_us(obj.get_jobs_us()[2]["jobId"]))
+schedules = obj.get_job_schedules_us(obj.get_jobs_us()[3]["jobId"])
+schedulesScored = obj.score_schedules(schedules)
+
+for s in schedulesScored:
+    print(f"{s['scheduleId']} \tscored: {s['score']}")
+
+best = max(schedulesScored, key=lambda s: s["score"])
+print(f"\n\n{best['scheduleId']} scored the most {best['score']}")
