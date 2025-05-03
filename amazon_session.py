@@ -194,5 +194,31 @@ class AmazonSession:
 
         return data
 
+    def keep_browser_alive(self):
+        """
+        Navigate to My Applications (or any lightweight page under auth)
+        to force the backend to refresh your session tokens.
+        """
+        url = self.conf["url"]["my_applications"]
+        try:
+            self.driver.get(url)
+
+            # wait until loaded
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located(
+                    (
+                        By.XPATH,
+                        '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div[1]/div[2]/b',
+                    )
+                )
+            )
+            print("Browser keep-alive hit:", url)
+            time.sleep(100000)
+        except Exception as e:
+            print("Keep-alive navigation failed:", e)
+
 
 amz = AmazonSession()
+amz.login(amz.driver, amz.conf)
+time.sleep(10)
+amz.keep_browser_alive()
