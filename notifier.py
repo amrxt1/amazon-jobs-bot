@@ -24,5 +24,4 @@ class Notifier:
 
 
 n = Notifier()
-print(n.cfg)
 n.notfy("Kiidaaa Sengghhhh!")

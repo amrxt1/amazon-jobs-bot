@@ -8,6 +8,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import undetected_chromedriver as uc
+import requests
 import yaml
 import time
 
@@ -16,6 +17,9 @@ class AmazonSession:
     def __init__(self):
         self.conf = self.config()
         self.driver = self.build_driver()
+        self.session = requests.Session()
+        self.candidate_id = None
+        self.application = {}
 
     def config(self):
         with open("config.yml", "r") as f:
@@ -121,4 +125,74 @@ class AmazonSession:
         otp_input.send_keys(otp)
         print("OTP entered!")
 
-        return -1
+        return True
+
+    def sessionToken(self):
+        script = """
+          const entry = Object.entries(localStorage)
+            .find(([key, _]) => key.endsWith('sessionToken'));
+          return entry ? entry[1] : null;
+        """
+        return self.driver.execute_script(script)
+
+    def idToken(self):
+        script = """
+          const entry = Object.entries(localStorage)
+            .find(([key, _]) => key.endsWith('idToken'));
+          return entry ? entry[1] : null;
+        """
+        return self.driver.execute_script(script)
+
+    def accessToken(self):
+        script = """
+          const entry = Object.entries(localStorage)
+            .find(([key, _]) => key.endsWith('accessToken'));
+          return entry ? entry[1] : null;
+        """
+        return self.driver.execute_script(script)
+
+    def set_candidate(self):
+        # use dummy values to imitate request creation
+        # self.candidate_id = "87af95e0-abac-11ee-accf-dbe181f4485b"
+        # return -1
+        script = """
+          const entry = Object.entries(localStorage)
+            .find(([key, _]) => key.endsWith('bbCandidateId'));
+          return entry ? entry[1] : null;
+        """
+        self.candidate_id = self.driver.execute_script(script)
+
+    def set_headers_with_fresh_tokens(self):
+        self.session.headers.update(
+            {
+                "Authorization": self.accessToken(),
+                "Content-Type": "application/json;charset=UTF-8",
+            }
+        )
+        return True
+
+    def create_application(self, jobId, scheduleId):
+        self.set_headers_with_fresh_tokens()
+        if self.candidate_id is None:
+            self.set_candidate()
+
+        body = {
+            "jobId": jobId,
+            "dspEnabled": True,
+            "scheduleId": scheduleId,
+            "candidateId": self.candidate_id,
+            "activeApplicationCheckEnabled": True,
+        }
+
+        resp = self.session.post(self.conf["url"]["create_app_url"], json=body)
+        resp.raise_for_status()
+
+        print("RESPONSE:\n\n")
+        print(resp)
+
+        data = resp.json().get("data", {})
+
+        return data
+
+
+amz = AmazonSession()
