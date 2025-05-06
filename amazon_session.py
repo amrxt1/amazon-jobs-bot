@@ -11,17 +11,25 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
-import undetected_chromedriver as uc
+
 import requests
+import imaplib
+import email
 import yaml
 import time
+import re
 import os
+
+from notifier import Notifier
 
 
 class AmazonSession:
-    def __init__(self, login, pin):
+    def __init__(self, name, login, pin, imap_conf: dict):
+        self.name = name
         self.login = login
         self.pin = pin
+        self.imap_conf = imap_conf
+
         self.conf = self.config()
         self.driver = self.build_driver()
         self.session = requests.Session()
@@ -68,6 +76,38 @@ class AmazonSession:
 
         return driver
 
+    def fetch_amazon_otp(self, imap_conf, since_seconds=120):
+        return None
+        M = imaplib.IMAP4_SSL(imap_conf["host"], imap_conf["port"])
+        M.login(imap_conf["user"], imap_conf["pass"])
+        M.select(imap_conf.get("folder", "INBOX"))
+
+        print("\n\n\ntrying email")
+
+        typ, data = M.search(None, '(UNSEEN FROM "no-reply@jobs.amazon.com")')
+        if typ != "OK":
+            return None
+
+        print(typ)
+        print("\n\n.", data)
+        for num in reversed(data[0].split()):
+            typ, msg_data = M.fetch(num, "(RFC822)")
+            msg = email.message_from_bytes(msg_data[0][1])
+            body = ""
+            if msg.is_multipart():
+                for part in msg.get_payload():
+                    if part.get_content_type() == "text/plain":
+                        body = part.get_payload(decode=True).decode(errors="ignore")
+                        break
+            else:
+                body = msg.get_payload(decode=True).decode(errors="ignore")
+
+            m = re.search(r"\b(\d{6})\b", body)
+            if m:
+                M.store(num, "+FLAGS", "\\Seen")
+                return m.group(1)
+        return None
+
     def _login(self):
         print("\t\tLogging in...")
         print("Navigating to login page...")
@@ -90,7 +130,7 @@ class AmazonSession:
             driver.find_element(By.XPATH, CONSENT_XPATH).click()
             print("Gained consent!")
         except Exception:
-            print("Not found")
+            print("Did not see a consent btn")
 
         # enter email
         WebDriverWait(driver, 10).until(
@@ -122,10 +162,22 @@ class AmazonSession:
             By.XPATH, '//*[@id="pageRouter"]/div/div/div/button'
         ).click()
 
-        # solve captchas and recieve otp
-        print("When you have finished the captcha, Check your email for OTP.")
-        otp = input("Enter the OTP, then press Enter to continue.\n\n> ")
+        # solve captchas and recieve otp - automate this next commit
+        # print("When you have finished the captcha, Check your email for OTP.")
+        # otp = input("Enter the OTP, then press Enter to continue.\n\n> ")
         # look for otp input
+        time.sleep(17)
+
+        otp = self.fetch_amazon_otp(self.imap_conf)
+        if otp:
+            print("****OTP fetched:", otp)
+        else:
+            n = Notifier()
+            n.notify(
+                f"TYPE: LOGIN-HELP\nYou need to enter otp for {self.name} with email: {self.login}"
+            )
+            otp = input("****Couldn’t fetch OTP—please enter manually:\n> ")
+
         WebDriverWait(driver, 300).until(
             EC.visibility_of_element_located(
                 (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
@@ -136,7 +188,7 @@ class AmazonSession:
             By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]'
         )
         otp_input.click()
-        otp_input.send_keys(otp)
+        otp_input.send_keys(str(otp))
         print("OTP entered!")
 
         return True

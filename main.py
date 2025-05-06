@@ -21,7 +21,7 @@ def jittered_sleep(min_s=5, max_s=15):
 
 
 def init_agent(user):
-    a = AmazonSession(user["login"], user["pin"])
+    a = AmazonSession(user["name"], user["login"], user["pin"], user["imap"])
     a._login()
     print("\n\nlogin succesful")
     time.sleep(7)
