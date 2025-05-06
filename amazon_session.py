@@ -4,6 +4,10 @@ The Amazon Session object.
 
 """
 
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -11,10 +15,13 @@ import undetected_chromedriver as uc
 import requests
 import yaml
 import time
+import os
 
 
 class AmazonSession:
-    def __init__(self):
+    def __init__(self, login, pin):
+        self.login = login
+        self.pin = pin
         self.conf = self.config()
         self.driver = self.build_driver()
         self.session = requests.Session()
@@ -27,64 +34,71 @@ class AmazonSession:
         return config
 
     def build_driver(self):
-        # options = Options()
-        # options.add_argument(f"--window-size={windowSize}")
-        # options.add_argument(
-        #     "user-agent=Mozilla/5.0 (X11; Linux x86_64) "
-        #     "AppleWebKit/537.36 (KHTML, like Gecko) "
-        #     "Chrome/136.0.0.0 Safari/537.36"
-        # )
-        # options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        # options.add_experimental_option("useAutomationExtension", False)
-        # options.add_argument("--disable-blink-features=AutomationControlled")
+        opts = Options()
 
-        # if isHeadless:
-        #     options.add_argument("--headless")
-        driver = uc.Chrome(use_subprocess=False)
-        # driver.execute_cdp_cmd(
-        #     "Page.addScriptToEvaluateOnNewDocument",
-        #     {
-        #         "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-        #     },
-        # )
+        chrome_bin = "/usr/bin/google-chrome-stable"
+        opts.binary_location = chrome_bin
+
+        profile_root = "/home/amrit/.config/amazon-bot-profiles"
+        os.makedirs(profile_root, exist_ok=True)
+        data_dir = os.path.join(profile_root, f"profile_{self.login}1")
+        opts.add_argument(f"--user-data-dir={data_dir}")
+
+        opts.add_argument("--no-sandbox")
+        opts.add_argument("--disable-dev-shm-usage")
+        opts.add_experimental_option("excludeSwitches", ["enable-automation"])
+        opts.add_experimental_option("useAutomationExtension", False)
+        opts.add_argument("--disable-blink-features=AutomationControlled")
+
+        service = Service(
+            "/usr/bin/chromedriver"
+        )  # make sure this matches your Chrome version
+        driver = webdriver.Chrome(service=service, options=opts)
+
         # driver.execute_cdp_cmd(
         #     "Network.setExtraHTTPHeaders",
         #     {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
         # )
         driver.execute_cdp_cmd(
-            "Network.setExtraHTTPHeaders",
-            {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
+            "Page.addScriptToEvaluateOnNewDocument",
+            {
+                "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            },
         )
 
         return driver
 
-    def login(self, driver, cfg):
+    def _login(self):
         print("\t\tLogging in...")
         print("Navigating to login page...")
+        cfg = self.conf
+        driver = self.driver
+
+        CONSENT_XPATH = (
+            "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button"
+        )
+        LOGIN_CSS = "#login"
+
         driver.get(cfg["url"]["login_url"])
 
-        # Look for and click on consent
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button",
-                )
-            )
+            EC.presence_of_element_located((By.CSS_SELECTOR, LOGIN_CSS))
         )
-        driver.find_element(
-            By.XPATH,
-            "/html/body/div[3]/div/div[2]/div/div/div/div/div/div/div/div[2]/button",
-        ).click()
-        print("Gained consent!")
+
+        # Look for and click on consent
+        try:
+            driver.find_element(By.XPATH, CONSENT_XPATH).click()
+            print("Gained consent!")
+        except Exception:
+            print("Not found")
 
         # enter email
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, '//*[@id="login"]'))
+            EC.presence_of_element_located((By.CSS_SELECTOR, LOGIN_CSS))
         )
-        email = driver.find_element(By.CSS_SELECTOR, "#login")
+        email = driver.find_element(By.CSS_SELECTOR, LOGIN_CSS)
         email.click()
-        email.send_keys(cfg["creds"]["email"])
+        email.send_keys(self.login)
         print("Email entered!")
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div[2]/div[1]/button'
@@ -97,7 +111,7 @@ class AmazonSession:
         )
         pin = driver.find_element(By.CSS_SELECTOR, "#pin")
         pin.click()
-        pin.send_keys(cfg["creds"]["pin"])
+        pin.send_keys(self.pin)
         print("PIN entered!")
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div/button'
@@ -172,6 +186,7 @@ class AmazonSession:
         return True
 
     def create_application(self, jobId, scheduleId):
+        # prepare session
         self.set_headers_with_fresh_tokens()
         if self.candidate_id is None:
             self.set_candidate()
@@ -194,16 +209,52 @@ class AmazonSession:
 
         return data
 
-    def keep_browser_alive(self):
-        """
-        Navigate to My Applications (or any lightweight page under auth)
-        to force the backend to refresh your session tokens.
-        """
+    def update_application(self, jobId, scheduleId, applicationId):
+        # prepare session
+        self.set_headers_with_fresh_tokens()
+        if self.candidate_id is None:
+            self.set_candidate()
+
+        body = {
+            "applicationId": applicationId,
+            "type": "job-confirm",
+            "dspEnabled": True,
+            "payload": {"jobId": jobId, "scheduleId": scheduleId},
+        }
+        resp = self.session.put(self.conf["url"]["update_app_url"], json=body)
+        resp.raise_for_status()
+
+        print("RESPONSE:\n\n")
+        print(resp)
+
+        data = resp.json().get("data", {})
+
+        return data
+
+    def update_workflow(self, applicationId):
+        # prepare session
+        self.set_headers_with_fresh_tokens()
+        if self.candidate_id is None:
+            self.set_candidate()
+
+        body = {
+            "applicationId": applicationId,
+            "workflowStepName": "general-questions",
+        }
+        resp = self.session.put(self.conf["url"]["update_flow_url"], json=body)
+        resp.raise_for_status()
+
+        print("RESPONSE:\n\n")
+        print(resp)
+
+        data = resp.json().get("data", {})
+
+        return data
+
+    def nav_to_timer_page(self):
         url = self.conf["url"]["my_applications"]
         try:
             self.driver.get(url)
-
-            # wait until loaded
             WebDriverWait(self.driver, 5).until(
                 EC.presence_of_element_located(
                     (
@@ -213,12 +264,20 @@ class AmazonSession:
                 )
             )
             print("Browser keep-alive hit:", url)
-            time.sleep(100000)
+            self.set_headers_with_fresh_tokens()
         except Exception as e:
             print("Keep-alive navigation failed:", e)
 
-
-amz = AmazonSession()
-amz.login(amz.driver, amz.conf)
-time.sleep(10)
-amz.keep_browser_alive()
+        WebDriverWait(self.driver, 15).until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div[1]/div[1]/div/div/div[2]/div[2]/div[11]/button[1]',
+                )
+            )
+        )
+        select_shift = self.driver.find_element(
+            By.XPATH,
+            '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div[1]/div[1]/div/div/div[2]/div[2]/div[11]/button[1]',
+        )
+        select_shift.click()

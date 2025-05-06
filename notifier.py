@@ -17,11 +17,7 @@ class Notifier:
             config = yaml.safe_load(f)
         return config["telegram"]
 
-    def notfy(self, message):
+    def notify(self, message):
         url = self.cfg["url"]
         params = {"chat_id": self.cfg["chat_id"], "text": message}
         requests.get(url + "/sendMessage", params=params)
-
-
-n = Notifier()
-n.notfy("Kiidaaa Sengghhhh!")

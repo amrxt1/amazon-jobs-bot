@@ -6,3 +6,8 @@ config.yml
 
 #ignore chromedriver
 chromedriver
+
+#credentials
+creds.py
+
+__pycache__/*

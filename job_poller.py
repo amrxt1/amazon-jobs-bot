@@ -223,9 +223,10 @@ class JobPoller:
             "query": "query searchScheduleCards($searchScheduleRequest: SearchScheduleRequest!) {\n  searchScheduleCards(searchScheduleRequest: $searchScheduleRequest) {\n    nextToken\n    scheduleCards {\n      hireStartDate\n      address\n      basePay\n      bonusSchedule\n      city\n      currencyCode\n      dataSource\n      distance\n      employmentType\n      externalJobTitle\n      featuredSchedule\n      firstDayOnSite\n      hoursPerWeek\n      image\n      jobId\n      jobPreviewVideo\n      language\n      postalCode\n      priorityRank\n      scheduleBannerText\n      scheduleId\n      scheduleText\n      scheduleType\n      signOnBonus\n      state\n      surgePay\n      tagLine\n      geoClusterId\n      geoClusterName\n      siteId\n      scheduleBusinessCategory\n      totalPayRate\n      financeWeekStartDate\n      laborDemandAvailableCount\n      scheduleBusinessCategoryL10N\n      firstDayOnSiteL10N\n      financeWeekStartDateL10N\n      scheduleTypeL10N\n      employmentTypeL10N\n      basePayL10N\n      signOnBonusL10N\n      totalPayRateL10N\n      distanceL10N\n      requiredLanguage\n      monthlyBasePay\n      monthlyBasePayL10N\n      vendorKamName\n      vendorId\n      vendorName\n      kamPhone\n      kamCorrespondenceEmail\n      kamStreet\n      kamCity\n      kamDistrict\n      kamState\n      kamCountry\n      kamPostalCode\n      __typename\n    }\n    __typename\n  }\n}\n",
         }
 
-        print("Schedules recieved...\n")
         data = self.graphQL(body=body, headers=self.headers_us)
         data = data["data"]["searchScheduleCards"]["scheduleCards"]
+
+        print("Schedules recieved...\n")
         if data:
             print("Response recieved...\n")
             print(f"Recieved {len(data)} schedules for {jobId}")
@@ -285,14 +286,3 @@ class JobPoller:
             scored.append({**s, "score": score})
 
         return scored
-
-
-obj = JobPoller()
-schedules = obj.get_job_schedules_us(obj.get_jobs_us()[3]["jobId"])
-schedulesScored = obj.score_schedules(schedules)
-
-for s in schedulesScored:
-    print(f"{s['scheduleId']} \tscored: {s['score']}")
-
-best = max(schedulesScored, key=lambda s: s["score"])
-print(f"\n\n{best['scheduleId']} scored the most {best['score']}")
