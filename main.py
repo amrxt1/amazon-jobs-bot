@@ -6,9 +6,9 @@ import sys
 import creds
 import traceback
 
-from amazon_session import AmazonSession
-from job_poller import JobPoller
-from notifier import Notifier
+from lib.amazon_session import AmazonSession
+from lib.job_poller import JobPoller
+from lib.notifier import Notifier
 
 SESSION_QUEUE = queue.Queue()
 THRESHOLD = 0.96
@@ -49,8 +49,10 @@ def schedule_relogin(session, interval_minutes: int = 55):
     t.start()
 
 
-def init_agent(user):
-    a = AmazonSession(user["name"], user["login"], user["pin"], user["imap"])
+def init_agent(user, notifier):
+    a = AmazonSession(
+        user["name"], user["login"], user["pin"], user["imap"], notifier=notifier
+    )
     a._login()
     print("\n\nlogin succesful")
     time.sleep(7)
@@ -62,11 +64,11 @@ def init_agent(user):
 
 
 def run_bot():
-    for user in creds.CREDS:
-        init_agent(user)
-
     poller = JobPoller()
     notifier = Notifier()
+
+    for user in creds.CREDS:
+        init_agent(user, notifier)
 
     seen = set()
 
