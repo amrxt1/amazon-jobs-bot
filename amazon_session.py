@@ -77,19 +77,15 @@ class AmazonSession:
         return driver
 
     def fetch_amazon_otp(self, imap_conf, since_seconds=120):
-        return None
         M = imaplib.IMAP4_SSL(imap_conf["host"], imap_conf["port"])
         M.login(imap_conf["user"], imap_conf["pass"])
         M.select(imap_conf.get("folder", "INBOX"))
 
-        print("\n\n\ntrying email")
-
+        print("fetching otp from email")
         typ, data = M.search(None, '(UNSEEN FROM "no-reply@jobs.amazon.com")')
         if typ != "OK":
             return None
 
-        print(typ)
-        print("\n\n.", data)
         for num in reversed(data[0].split()):
             typ, msg_data = M.fetch(num, "(RFC822)")
             msg = email.message_from_bytes(msg_data[0][1])
@@ -166,7 +162,7 @@ class AmazonSession:
         # print("When you have finished the captcha, Check your email for OTP.")
         # otp = input("Enter the OTP, then press Enter to continue.\n\n> ")
         # look for otp input
-        time.sleep(17)
+        time.sleep(7)
 
         otp = self.fetch_amazon_otp(self.imap_conf)
         if otp:
@@ -178,7 +174,7 @@ class AmazonSession:
             )
             otp = input("****Couldn’t fetch OTP—please enter manually:\n> ")
 
-        WebDriverWait(driver, 300).until(
+        WebDriverWait(driver, 10).until(
             EC.visibility_of_element_located(
                 (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
             )

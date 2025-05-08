@@ -4,6 +4,7 @@ import time
 import random
 import sys
 import creds
+import traceback
 
 from amazon_session import AmazonSession
 from job_poller import JobPoller
@@ -20,6 +21,34 @@ def jittered_sleep(min_s=5, max_s=15):
     time.sleep(t)
 
 
+AMTMP = 0
+
+
+def _relogin_worker(session, interval_minutes):
+    """
+    Background loop: sleep for interval_minutes, then re-login & refresh headers.
+    """
+    while True:
+        time.sleep(interval_minutes * 60)
+        try:
+            print(f"\n{session.login}: refreshing session...")
+            session._login()
+            session.set_headers_with_fresh_tokens()
+            print(f"{session.login}: session refreshed")
+        except Exception as e:
+            print(f"{session.login}: failed to refresh session:", e)
+
+
+def schedule_relogin(session, interval_minutes: int = 55):
+    """
+    Spins off a daemon thread that runs _relogin_worker.
+    """
+    t = threading.Thread(
+        target=_relogin_worker, args=(session, interval_minutes), daemon=True
+    )
+    t.start()
+
+
 def init_agent(user):
     a = AmazonSession(user["name"], user["login"], user["pin"], user["imap"])
     a._login()
@@ -27,13 +56,12 @@ def init_agent(user):
     time.sleep(7)
     a.set_headers_with_fresh_tokens()
 
-    # t = threading.Thread(target=keep_session_alive, args=(a,), daemon=True)
-    # t.start()
+    schedule_relogin(a, interval_minutes=55)
 
     SESSION_QUEUE.put(a)
 
 
-def main():
+def run_bot():
     for user in creds.CREDS:
         init_agent(user)
 
@@ -104,7 +132,7 @@ def main():
 
                         try:
                             agent.nav_to_timer_page()
-                        except Exception as e:
+                        except Exception:
                             print("Nah v bni ni gal")
                             time.sleep(5)
 
@@ -120,9 +148,20 @@ def main():
                     except Exception as e:
                         print("Agent failed, rotating:", e)
             jittered_sleep()
-    except KeyboardInterrupt:
-        print("\nGracefully shutting down...||")
+    except Exception as e:
+        print("\nSomething happened which would cause exiting:\n", e)
 
 
 if __name__ == "__main__":
-    main()
+    while True:
+        try:
+            run_bot()
+            break
+        except KeyboardInterrupt:
+            print("\n\n||\tGracefully exiting...")
+            break
+        except Exception:
+            print("******** Unhandled exception in run_bot(), restarting in 5s:")
+            traceback.print_exc()
+            time.sleep(5)
+            print("******** Restarting bot...")
