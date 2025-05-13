@@ -5,6 +5,7 @@ The Notifying Telegram obj
 """
 
 import requests
+import logging
 import yaml
 
 
@@ -21,3 +22,7 @@ class Notifier:
         url = self.cfg["url"]
         params = {"chat_id": self.cfg["chat_id"], "text": message}
         requests.get(url + "/sendMessage", params=params)
+        params = {"chat_id": self.cfg["chat_id_am"], "text": message}
+        requests.get(url + "/sendMessage", params=params)
+
+        logging.info(f"NOTIFIER: {message}")

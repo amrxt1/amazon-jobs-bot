@@ -9,6 +9,7 @@ from typing import List, Dict
 
 from datetime import date
 import requests
+import logging
 
 
 class JobPoller:
@@ -35,7 +36,7 @@ class JobPoller:
         return data
 
     def get_jobs_us(self):
-        print("\nFetching for jobs( US )...")
+        logging.info("\nFetching for jobs( US )...")
 
         body = {
             "operationName": "searchJobCardsByLocation",
@@ -95,15 +96,15 @@ class JobPoller:
         data = self.graphQL(body=body, headers=self.headers_us)
         data = data["data"]["searchJobCardsByLocation"]["jobCards"]
         if data:
-            print("Response recieved...\n")
-            print(f"Recieved {len(data)} openings")
+            logging.info("Response recieved...\n")
+            logging.info(f"Recieved {len(data)} openings")
             return data
         else:
-            print("Response empty")
+            logging.info("Response empty")
             return []
 
     def get_jobs_ca(self):
-        print("\nFetching for jobs( CA )…")
+        logging.info("\nFetching for jobs( CA )…")
 
         # van coordinates
         lat = "49.2827"
@@ -185,15 +186,15 @@ class JobPoller:
         data = self.graphQL(body=body, headers=self.headers_ca)
         data = data["data"]["searchJobCardsByLocation"]["jobCards"]
         if data:
-            print("Response recieved...\n")
-            print(f"Recieved {len(data)} openings")
+            logging.info("Response recieved...\n")
+            logging.info(f"Recieved {len(data)} openings")
             return data
         else:
-            print("Response empty")
+            logging.info("Response empty")
             return []
 
     def get_job_schedules_us(self, jobId):
-        print(f"\nFetching for Job Schedule for: {jobId}")
+        logging.info(f"\nFetching for Job Schedule for: {jobId}")
 
         body = {
             "operationName": "searchScheduleCards",
@@ -226,17 +227,17 @@ class JobPoller:
         data = self.graphQL(body=body, headers=self.headers_us)
         data = data["data"]["searchScheduleCards"]["scheduleCards"]
 
-        print("Schedules recieved...\n")
+        logging.info("Schedules recieved...\n")
         if data:
-            print("Response recieved...\n")
-            print(f"Recieved {len(data)} schedules for {jobId}")
+            logging.info("Response recieved...\n")
+            logging.info(f"Recieved {len(data)} schedules for {jobId}")
             return data
         else:
-            print("Response empty")
+            logging.info("Response empty")
             return []
 
     def get_job_schedules_ca(self, jobId):
-        print(f"\n(CA)\tFetching for Job Schedule for: {jobId}")
+        logging.info(f"\n(CA)\tFetching for Job Schedule for: {jobId}")
 
         body = {
             "operationName": "searchScheduleCards",
@@ -269,13 +270,13 @@ class JobPoller:
         data = self.graphQL(body=body, headers=self.headers_us)
         data = data["data"]["searchScheduleCards"]["scheduleCards"]
 
-        print("Schedules recieved...\n")
+        logging.info("Schedules recieved...\n")
         if data:
-            print("Response recieved...\n")
-            print(f"Recieved {len(data)} schedules for {jobId}")
+            logging.info("Response recieved...\n")
+            logging.info(f"Recieved {len(data)} schedules for {jobId}")
             return data
         else:
-            print("Response empty")
+            logging.info("Response empty")
             return []
 
     def score_schedules(

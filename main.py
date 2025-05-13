@@ -1,27 +1,31 @@
-import threading
-import queue
-import time
-import random
-import sys
-import creds
 import traceback
-
+import threading
+import argparse
+import logging
+import pprint
+import random
+import queue
+import creds
+import time
+import sys
 from lib.amazon_session import AmazonSession
 from lib.job_poller import JobPoller
 from lib.notifier import Notifier
+from datetime import datetime
 
-SESSION_QUEUE = queue.Queue()
-THRESHOLD = 0.96
+logfile = f"logs/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.FileHandler(logfile), logging.StreamHandler()],
+)
 
 
 def jittered_sleep(min_s=5, max_s=15):
     """Wait a bit before the next poll, to avoid a rigid bot fingerprint."""
     t = random.uniform(min_s, max_s)
-    print(f"Sleeping {t:.1f}s before next poll...")
+    logging.info(f"Sleeping {t:.1f}s before next poll...")
     time.sleep(t)
-
-
-AMTMP = 0
 
 
 def _relogin_worker(session, interval_minutes):
@@ -31,12 +35,12 @@ def _relogin_worker(session, interval_minutes):
     while True:
         time.sleep(interval_minutes * 60)
         try:
-            print(f"\n{session.login}: refreshing session...")
+            logging.info(f"{session.login}: refreshing session...")
             session._login()
             session.set_headers_with_fresh_tokens()
-            print(f"{session.login}: session refreshed")
+            logging.info(f"{session.login}: session refreshed")
         except Exception as e:
-            print(f"{session.login}: failed to refresh session:", e)
+            logging.info(f"{session.login}: failed to refresh session:", e)
 
 
 def schedule_relogin(session, interval_minutes: int = 55):
@@ -49,12 +53,10 @@ def schedule_relogin(session, interval_minutes: int = 55):
     t.start()
 
 
-def init_agent(user, notifier):
-    a = AmazonSession(
-        user["name"], user["login"], user["pin"], user["imap"], notifier=notifier
-    )
+def init_agent(user, notifier, SESSION_QUEUE, region):
+    a = AmazonSession(user, notifier=notifier, region=region)
     a._login()
-    print("\n\nlogin succesful")
+    logging.info("Login succesful for: {a.name}")
     time.sleep(7)
     a.set_headers_with_fresh_tokens()
 
@@ -63,25 +65,29 @@ def init_agent(user, notifier):
     SESSION_QUEUE.put(a)
 
 
-def run_bot():
+def main(region="us"):
+    SESSION_QUEUE = queue.Queue()
     poller = JobPoller()
     notifier = Notifier()
-
-    for user in creds.CREDS:
-        init_agent(user, notifier)
-
     seen = set()
 
-    print("Initialized, queue size:", SESSION_QUEUE.qsize())
-    print("Ready to go...")
+    for user in creds.CREDS:
+        init_agent(user, notifier, SESSION_QUEUE, region)
+
+    logging.info(f"Initialized, queue size: {SESSION_QUEUE.qsize()}")
+    logging.info("Ready to go...")
 
     try:
         while True:
-            print("\n----Polling for new schedules----")
-            jobs = poller.get_jobs_us()
+            logging.info(f"\n----Polling for new schedules ({region})----")
+            jobs = poller.get_jobs_us() if (region == "us") else poller.get_jobs_ca()
             for job in jobs:
                 job_id = job["jobId"]
-                scheds = poller.get_job_schedules_us(job_id)
+                scheds = (
+                    poller.get_job_schedules_us(job_id)
+                    if (region == "us")
+                    else poller.get_job_schedules_ca(job_id)
+                )
                 if not scheds:
                     continue
 
@@ -94,7 +100,7 @@ def run_bot():
                         continue
                     seen.add(key)
 
-                    print(
+                    logging.info(
                         f"  {s['scheduleId']:16}  scored: {s['score']:.3f}"
                         + ("  ← candidate" if s["score"] >= THRESHOLD else "")
                     )
@@ -105,38 +111,42 @@ def run_bot():
                     try:
                         agent = SESSION_QUEUE.get(timeout=5)
                     except queue.Empty:
-                        print("No free sessions...")
-                        print("Exiting...")
+                        logging.info("No free sessions...")
+                        logging.info("Exiting...")
                         sys.exit(0)
                     except Exception:
                         continue
 
                     try:
-                        print(
+                        logging.info(
                             f"***STEP1. Found a match, creating application... using {job_id} with the schedule: {s['scheduleId']}"
                         )
 
                         app = agent.create_application(job["jobId"], s["scheduleId"])
-                        print("***STEP2. Created Application:", app)
+                        logging.info(
+                            f"***STEP2. Created Application:\n{pprint.pformat(app)}"
+                        )
 
-                        print("***STEP3. Update Application Invoked...")
+                        logging.info("***STEP3. Update Application Invoked...")
                         agent.update_application(
                             job["jobId"], s["scheduleId"], app["applicationId"]
                         )
-                        print("Update Successful!")
+                        logging.info("Update Successful!")
 
-                        print("***STEP4. Update Work-flow State")
+                        logging.info("***STEP4. Update Work-flow State")
                         agent.update_workflow(app["applicationId"])
 
-                        print(
+                        logging.info(
                             f"Reserved.\n***STEP5. Notifying and closing agent for {agent.login}"
                         )
 
                         try:
-                            agent.nav_to_timer_page()
+                            agent.start_timer()
                         except Exception:
-                            print("Nah v bni ni gal")
+                            logging.exception("Timer Failed")
                             time.sleep(5)
+
+                        agent.driver.quit()
 
                         notifier.notify(
                             f"Reserved for {agent.login}\n\n"
@@ -148,22 +158,40 @@ def run_bot():
                             )
                         )
                     except Exception as e:
-                        print("Agent failed, rotating:", e)
+                        logging.exception(f"Agent failed, rotating: {e}")
             jittered_sleep()
     except Exception as e:
-        print("\nSomething happened which would cause exiting:\n", e)
+        logging.exception(f"Something happened which would cause exiting:\n {e}")
 
+
+THRESHOLD = 0.77
 
 if __name__ == "__main__":
+    """
+    CLI docs.
+    """
+    parser = argparse.ArgumentParser(
+        prog="amazon-job-picker", description="Reserve Amazon shifts (US or CA)"
+    )
+    parser.add_argument(
+        "--country",
+        "-c",
+        choices=["us", "ca"],
+        default="us",
+        help="Which region to target (default: us)",
+    )
+    args = parser.parse_args()
     while True:
         try:
-            run_bot()
-            break
+            if args.country == "us":
+                main(region="us")
+            else:
+                main(region="ca")
         except KeyboardInterrupt:
-            print("\n\n||\tGracefully exiting...")
+            logging.info("\n\n||\tGracefully exiting...")
             break
-        except Exception:
-            print("******** Unhandled exception in run_bot(), restarting in 5s:")
-            traceback.print_exc()
-            time.sleep(5)
-            print("******** Restarting bot...")
+        except Exception as e:
+            logging.exc(
+                f"******** Unhandled exception in run_bot(), restarting in 5s:\n{e}"
+            )
+            logging.info("******** Restarting bot...")

@@ -14,6 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 import requests
 import imaplib
+import logging
 import email
 import yaml
 import time
@@ -22,11 +23,12 @@ import os
 
 
 class AmazonSession:
-    def __init__(self, name, login, pin, imap_conf: dict, notifier):
-        self.name = name
-        self.login = login
-        self.pin = pin
-        self.imap_conf = imap_conf
+    def __init__(self, user, notifier, region="us"):
+        self.name = user["name"]
+        self.login = user["login"]
+        self.pin = user["pin"]
+
+        self.imap_conf = user["imap"]
         self.notifier = notifier
 
         self.conf = self.config()
@@ -34,6 +36,8 @@ class AmazonSession:
         self.session = requests.Session()
         self.candidate_id = None
         self.application = {}
+
+        self.region = region
 
     def config(self):
         with open("config.yml", "r") as f:
@@ -46,7 +50,7 @@ class AmazonSession:
         chrome_bin = "/usr/bin/google-chrome-stable"
         opts.binary_location = chrome_bin
 
-        profile_root = "/home/amrit/.config/amazon-bot-profiles"
+        profile_root = self.conf["chromedriver"]["profiles_root"]
         os.makedirs(profile_root, exist_ok=True)
         data_dir = os.path.join(profile_root, f"profile_{self.login}1")
         opts.add_argument(f"--user-data-dir={data_dir}")
@@ -57,15 +61,9 @@ class AmazonSession:
         opts.add_experimental_option("useAutomationExtension", False)
         opts.add_argument("--disable-blink-features=AutomationControlled")
 
-        service = Service(
-            "/usr/bin/chromedriver"
-        )  # make sure this matches your Chrome version
+        service = Service("/usr/bin/chromedriver")
         driver = webdriver.Chrome(service=service, options=opts)
 
-        # driver.execute_cdp_cmd(
-        #     "Network.setExtraHTTPHeaders",
-        #     {"headers": {"Cache-Control": "no-cache", "Pragma": "no-cache"}},
-        # )
         driver.execute_cdp_cmd(
             "Page.addScriptToEvaluateOnNewDocument",
             {
@@ -80,7 +78,7 @@ class AmazonSession:
         M.login(imap_conf["user"], imap_conf["pass"])
         M.select(imap_conf.get("folder", "INBOX"))
 
-        print("fetching otp from email")
+        logging.info("Fetching otp from email...")
         typ, data = M.search(None, '(UNSEEN FROM "no-reply@jobs.amazon.com")')
         if typ != "OK":
             return None
@@ -100,12 +98,13 @@ class AmazonSession:
             m = re.search(r"\b(\d{6})\b", body)
             if m:
                 M.store(num, "+FLAGS", "\\Seen")
+                M.logout()
                 return m.group(1)
         return None
 
     def _login(self):
-        print("\t\tLogging in...")
-        print("Navigating to login page...")
+        logging.info("Log in initiated...")
+        logging.info("Navigating to login page...")
         cfg = self.conf
         driver = self.driver
 
@@ -114,7 +113,7 @@ class AmazonSession:
         )
         LOGIN_CSS = "#login"
 
-        driver.get(cfg["url"]["login_url"])
+        driver.get(cfg["url"][f"login_url_{self.region}"])
 
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, LOGIN_CSS))
@@ -123,9 +122,9 @@ class AmazonSession:
         # Look for and click on consent
         try:
             driver.find_element(By.XPATH, CONSENT_XPATH).click()
-            print("Gained consent!")
+            logging.info("Gained consent!")
         except Exception:
-            print("Did not see a consent btn")
+            logging.warning("Did not see a consent btn!")
 
         # enter email
         WebDriverWait(driver, 10).until(
@@ -134,11 +133,11 @@ class AmazonSession:
         email = driver.find_element(By.CSS_SELECTOR, LOGIN_CSS)
         email.click()
         email.send_keys(self.login)
-        print("Email entered!")
+        logging.info("Email entered!")
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div[2]/div[1]/button'
         ).click()
-        print("Approaching PIN...")
+        logging.info("Approaching PIN...")
 
         # enter PIN
         WebDriverWait(driver, 10).until(
@@ -147,25 +146,21 @@ class AmazonSession:
         pin = driver.find_element(By.CSS_SELECTOR, "#pin")
         pin.click()
         pin.send_keys(self.pin)
-        print("PIN entered!")
+        logging.info("PIN entered!")
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div/button'
         ).click()
-        print("Approaching OTP...")
+        logging.info("Approaching OTP...")
         time.sleep(5)
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div/button'
         ).click()
 
-        # solve captchas and recieve otp - automate this next commit
-        # print("When you have finished the captcha, Check your email for OTP.")
-        # otp = input("Enter the OTP, then press Enter to continue.\n\n> ")
-        # look for otp input
         time.sleep(7)
 
         otp = self.fetch_amazon_otp(self.imap_conf)
         if otp:
-            print("****OTP fetched:", otp)
+            logging.info(f"****OTP fetched: {otp}")
         else:
             n = self.notifier
             n.notify(
@@ -184,7 +179,7 @@ class AmazonSession:
         )
         otp_input.click()
         otp_input.send_keys(str(otp))
-        print("OTP entered!")
+        logging.info("OTP entered!")
 
         return True
 
@@ -213,9 +208,6 @@ class AmazonSession:
         return self.driver.execute_script(script)
 
     def set_candidate(self):
-        # use dummy values to imitate request creation
-        # self.candidate_id = "87af95e0-abac-11ee-accf-dbe181f4485b"
-        # return -1
         script = """
           const entry = Object.entries(localStorage)
             .find(([key, _]) => key.endsWith('bbCandidateId'));
@@ -233,7 +225,6 @@ class AmazonSession:
         return True
 
     def create_application(self, jobId, scheduleId):
-        # prepare session
         self.set_headers_with_fresh_tokens()
         if self.candidate_id is None:
             self.set_candidate()
@@ -246,18 +237,19 @@ class AmazonSession:
             "activeApplicationCheckEnabled": True,
         }
 
-        resp = self.session.post(self.conf["url"]["create_app_url"], json=body)
+        resp = self.session.post(
+            self.conf["url"][f"create_app_url_{self.region}"], json=body
+        )
         resp.raise_for_status()
 
-        print("RESPONSE:\n\n")
-        print(resp)
+        logging.info("RESPONSE:\n\n")
+        logging.info(resp)
 
         data = resp.json().get("data", {})
 
         return data
 
     def update_application(self, jobId, scheduleId, applicationId):
-        # prepare session
         self.set_headers_with_fresh_tokens()
         if self.candidate_id is None:
             self.set_candidate()
@@ -268,18 +260,19 @@ class AmazonSession:
             "dspEnabled": True,
             "payload": {"jobId": jobId, "scheduleId": scheduleId},
         }
-        resp = self.session.put(self.conf["url"]["update_app_url"], json=body)
+        resp = self.session.put(
+            self.conf["url"][f"update_app_url_{self.region}"], json=body
+        )
         resp.raise_for_status()
 
-        print("RESPONSE:\n\n")
-        print(resp)
+        logging.info("RESPONSE:\n\n")
+        logging.info(resp)
 
         data = resp.json().get("data", {})
 
         return data
 
     def update_workflow(self, applicationId):
-        # prepare session
         self.set_headers_with_fresh_tokens()
         if self.candidate_id is None:
             self.set_candidate()
@@ -288,43 +281,73 @@ class AmazonSession:
             "applicationId": applicationId,
             "workflowStepName": "general-questions",
         }
-        resp = self.session.put(self.conf["url"]["update_flow_url"], json=body)
+        resp = self.session.put(
+            self.conf["url"][f"update_flow_url_{self.region}"], json=body
+        )
         resp.raise_for_status()
 
-        print("RESPONSE:\n\n")
-        print(resp)
+        logging.info("RESPONSE:\n\n")
+        logging.info(resp)
 
         data = resp.json().get("data", {})
 
         return data
 
-    def nav_to_timer_page(self):
-        url = self.conf["url"]["my_applications"]
+    def start_timer(self):
+        url = self.conf["url"][f"my_applications_{self.region}"]
+        logging.info(f"Initiating timer for {self.name}")
         try:
             self.driver.get(url)
-            WebDriverWait(self.driver, 5).until(
+            logging.info("Arrived at url, awaiting my jobs to appear")
+            WebDriverWait(self.driver, 15).until(
                 EC.presence_of_element_located(
                     (
                         By.XPATH,
-                        '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div[1]/div[2]/b',
+                        '//*[@id="pageRouter"]/div/div/div[2]/div[1]/div/div',
                     )
                 )
             )
-            print("Browser keep-alive hit:", url)
-            self.set_headers_with_fresh_tokens()
+            logging.info(f"My jobs loaded {url}")
         except Exception as e:
-            print("Keep-alive navigation failed:", e)
+            logging.exception("Navigation to timer failed:", e)
 
+        logging.info("Awaiting jobs to appear.")
         WebDriverWait(self.driver, 15).until(
             EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div[1]/div[1]/div/div/div[2]/div[2]/div[11]/button[1]',
-                )
+                (By.XPATH, '//*[normalize-space(.)="Select Shift"]')
             )
         )
         select_shift = self.driver.find_element(
-            By.XPATH,
-            '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div[1]/div[1]/div/div/div[2]/div[2]/div[11]/button[1]',
+            By.XPATH, '//*[normalize-space(.)="Select Shift"]'
         )
+
         select_shift.click()
+        logging.info("Clicked on the job")
+
+        logging.info("Awaiting Schedules to appear.")
+        WebDriverWait(self.driver, 15).until(
+            EC.presence_of_element_located(
+                (By.XPATH, '//*[normalize-space(.)="Start Date:"]')
+            )
+        )
+        logging.info("A schedule appeared")
+        element = self.driver.find_element(
+            By.XPATH, '//*[normalize-space(.)="Start Date:"]'
+        )
+        element.click()
+        logging.info("Clicked on the first schedule")
+
+        logging.info("Awaiting select job btn to appear.")
+        WebDriverWait(self.driver, 15).until(
+            EC.presence_of_element_located(
+                (By.XPATH, '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button')
+            )
+        )
+        logging.info("btn appeared")
+        element = self.driver.find_element(
+            By.XPATH, '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button'
+        )
+
+        element.click()
+        logging.info("Clicked on the first schedule")
+        logging.info("Run succesful. TImer started!\n")
