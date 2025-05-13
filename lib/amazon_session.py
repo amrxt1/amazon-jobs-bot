@@ -157,6 +157,14 @@ class AmazonSession:
         ).click()
 
         time.sleep(7)
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.visibility_of_element_located(
+                    (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
+                )
+            )
+        except Exception:
+            logging.exception("Captcha error probably")
 
         otp = self.fetch_amazon_otp(self.imap_conf)
         if otp:
@@ -168,12 +176,7 @@ class AmazonSession:
             )
             otp = input("****Couldn’t fetch OTP—please enter manually:\n> ")
 
-        WebDriverWait(driver, 10).until(
-            EC.visibility_of_element_located(
-                (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
-            )
-        )
-
+        # entering otp below
         otp_input = driver.find_element(
             By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]'
         )
@@ -224,16 +227,20 @@ class AmazonSession:
         )
         return True
 
-    def aws_authenticated_post_request(
-        self, url, body, caller="caller_name()", max_retries=5, timeout=11
+    def aws_authenticated_request(
+        self, url, body, method, caller="caller_name()", max_retries=5, timeout=11
     ):
+        """
+        Imitates an authenticated call to the amazon-hiring backend api
+        """
         if not self.candidate_id:
             self.set_candidate()
         for attempt in range(1, max_retries + 1):
             self.set_headers_with_fresh_tokens()
 
             try:
-                resp = self.session.post(
+                resp = self.session.request(
+                    method=method,
                     url=url,
                     json=body,
                     timeout=timeout,
@@ -266,9 +273,10 @@ class AmazonSession:
             "candidateId": self.candidate_id,
             "activeApplicationCheckEnabled": True,
         }
-        return self.aws_authenticated_post_request(
+        return self.aws_authenticated_request(
             self.conf["url"][f"create_app_url_{self.region}"],
             body=body,
+            method="POST",
             caller="create_application",
         )
 
@@ -281,9 +289,10 @@ class AmazonSession:
             "dspEnabled": True,
             "payload": {"jobId": jobId, "scheduleId": scheduleId},
         }
-        return self.aws_authenticated_post_request(
+        return self.aws_authenticated_request(
             self.conf["url"][f"update_app_url_{self.region}"],
             body=body,
+            method="PUT",
             caller="update_application",
         )
 
@@ -292,9 +301,10 @@ class AmazonSession:
             "applicationId": applicationId,
             "workflowStepName": "general-questions",
         }
-        return self.aws_authenticated_post_request(
+        return self.aws_authenticated_request(
             self.conf["url"][f"update_flow_url_{self.region}"],
             body=body,
+            method="PUT",
             caller="update_workflow",
         )
 
@@ -308,13 +318,13 @@ class AmazonSession:
                 EC.presence_of_element_located(
                     (
                         By.XPATH,
-                        '//*[@id="pageRouter"]/div/div/div[2]/div[1]/div/div',
+                        '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div/div/div/div/div[2]/div[8]/button[1]',
                     )
                 )
             )
             logging.info(f"My jobs loaded {url}")
-        except Exception as e:
-            logging.exception("Navigation to timer failed:", e)
+        except Exception:
+            logging.exception("Navigation to timer failed")
 
         logging.info("Awaiting jobs to appear.")
         WebDriverWait(self.driver, 15).until(
@@ -355,4 +365,6 @@ class AmazonSession:
 
         element.click()
         logging.info("Clicked on the first schedule")
-        logging.info("Run succesful. TImer started!\n")
+        logging.info("Run succesful. TImer started!\nClosing driver.")
+        time.sleep(3)
+        self.driver.quit()

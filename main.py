@@ -7,10 +7,13 @@ import queue
 import creds
 import time
 import sys
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait
 from lib.amazon_session import AmazonSession
 from lib.job_poller import JobPoller
 from lib.notifier import Notifier
 from datetime import datetime
+
 
 logfile = f"logs/main/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
@@ -55,7 +58,7 @@ def schedule_relogin(session, interval_minutes: int = 55):
 def init_agent(user, notifier, SESSION_QUEUE, region):
     a = AmazonSession(user, notifier=notifier, region=region)
     a._login()
-    logging.info("Login succesful for: {a.name}")
+    logging.info(f"Login succesful for: {a.name}")
     time.sleep(7)
     a.set_headers_with_fresh_tokens()
 
@@ -66,6 +69,9 @@ def init_agent(user, notifier, SESSION_QUEUE, region):
 
 def main(region="us"):
     SESSION_QUEUE = queue.Queue()
+    timer_futures = []
+    executor = ThreadPoolExecutor(max_workers=(len(creds.CREDS)))
+
     poller = JobPoller()
     notifier = Notifier()
     seen = set()
@@ -110,10 +116,10 @@ def main(region="us"):
                     try:
                         agent = SESSION_QUEUE.get(timeout=5)
                     except queue.Empty:
-                        logging.info("No free sessions...")
-                        logging.info("Exiting...")
-                        sys.exit(0)
-                    except Exception:
+                        logging.info("No free sessions...exiting")
+                        return True
+                    except Exception as e:
+                        logging.exception(f"SessionQueue exception :\n{e}")
                         continue
 
                     try:
@@ -126,25 +132,40 @@ def main(region="us"):
                             f"***STEP2. Created Application:\n{pprint.pformat(app)}"
                         )
 
-                        logging.info("***STEP3. Update Application Invoked...")
-                        agent.update_application(
-                            job["jobId"], s["scheduleId"], app["applicationId"]
-                        )
-                        logging.info("Update Successful!")
+                        # try to update application once created, if not, just move to UI
+                        try:
+                            logging.info("***STEP3. Update Application Invoked...")
+                            app = agent.update_application(
+                                job["jobId"], s["scheduleId"], app["applicationId"]
+                            )
+                            logging.info(f"Update Successful!\n{app}")
 
-                        logging.info("***STEP4. Update Work-flow State")
-                        agent.update_workflow(app["applicationId"])
+                            logging.info("***STEP4. Update Work-flow State")
+                            agent.update_workflow(app["applicationId"])
 
-                        logging.info(
-                            f"Reserved.\n***STEP5. Notifying and closing agent for {agent.login}"
-                        )
+                            logging.info(
+                                f"Reserved.\n***STEP5. Notifying and closing agent for {agent.login}"
+                            )
+                        except Exception:
+                            logging.exception(
+                                "Application created but unable to Update."
+                            )
+                            notifier.notify(
+                                "UNABLE TO START UI TIMER\n"
+                                + f"Reserved for {agent.login}\n\n"
+                                f"Reserved {job_id}@{s['scheduleId']}  score={s['score']:.3f} \n"
+                                + (
+                                    f"application_id: {app['applicationId']} \ncandidateId: {app['candidateId']}"
+                                    if app
+                                    else ""
+                                )
+                            )
 
                         try:
-                            agent.start_timer()
+                            future = executor.submit(agent.start_timer)
+                            timer_futures.append(future)
                         except Exception:
                             logging.exception("Start Timer Failed")
-
-                        agent.driver.quit()
 
                         notifier.notify(
                             f"Reserved for {agent.login}\n\n"
@@ -160,9 +181,12 @@ def main(region="us"):
             jittered_sleep()
     except Exception as e:
         logging.exception(f"Something happened which would cause exiting:\n {e}")
+    finally:
+        logging.info("Shutting down ThreadPoolExecutor")
+        executor.shutdown(wait=True)
 
 
-THRESHOLD = 0.77
+THRESHOLD = 0.75
 
 if __name__ == "__main__":
     """
@@ -179,17 +203,30 @@ if __name__ == "__main__":
         help="Which region to target (default: us)",
     )
     args = parser.parse_args()
+    close_script = False
+
+    logging.info(f"""
+    Welcome to BotJob-Sniper3000
+
+    Region seleted:{args.country}
+
+    DISCLAIMER: This is purely for educational and experimental basis.
+    """)
+
     while True:
+        close_script = False
         try:
             if args.country == "us":
-                main(region="us")
+                close_script = main(region="us")
             else:
-                main(region="ca")
+                close_script = main(region="ca")
         except KeyboardInterrupt:
             logging.info("\n\n||\tGracefully exiting...")
             break
         except Exception as e:
-            logging.exc(
+            logging.exception(
                 f"******** Unhandled exception in run_bot(), restarting in 5s:\n{e}"
             )
             logging.info("******** Restarting bot...")
+        if close_script:
+            break

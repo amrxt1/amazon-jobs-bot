@@ -107,8 +107,8 @@ class JobPoller:
         logging.info("\nFetching for jobs( CA )…")
 
         # van coordinates
-        lat = "49.2827"
-        lng = "-123.1207"
+        # lat = "49.2827"
+        # lng = "-123.1207"
 
         body = {
             "operationName": "searchJobCardsByLocation",
@@ -117,12 +117,12 @@ class JobPoller:
                     "locale": "en-CA",
                     "country": "Canada",
                     "pageSize": 100,
-                    "geoQueryClause": {
-                        "lat": lat,
-                        "lng": lng,
-                        "unit": "km",
-                        "distance": 150,
-                    },
+                    # "geoQueryClause": {
+                    #     "lat": lat,
+                    #     "lng": lng,
+                    #     "unit": "km",
+                    #     "distance": 150,
+                    # },
                     "dateFilters": [
                         {
                             "key": "firstDayOnSite",
