@@ -224,9 +224,8 @@ class AmazonSession:
         )
         return True
 
-    def create_application(self, jobId, scheduleId):
-        self.set_headers_with_fresh_tokens()
-        if self.candidate_id is None:
+    def create_application(self, jobId, scheduleId, max_retries=5, timeout=11):
+        if not self.candidate_id:
             self.set_candidate()
 
         body = {
@@ -237,17 +236,34 @@ class AmazonSession:
             "activeApplicationCheckEnabled": True,
         }
 
-        resp = self.session.post(
-            self.conf["url"][f"create_app_url_{self.region}"], json=body
-        )
-        resp.raise_for_status()
+        for attempt in range(1, max_retries + 1):
+            self.set_headers_with_fresh_tokens()
 
-        logging.info("RESPONSE:\n\n")
-        logging.info(resp)
+            try:
+                resp = self.session.post(
+                    self.conf["url"][f"create_app_url_{self.region}"],
+                    json=body,
+                    timeout=timeout,
+                )
+            except requests.exceptions.RequestException as e:
+                logging.warning(f"Attempt {attempt}: request failed — {e}")
+                continue
 
-        data = resp.json().get("data", {})
+            if resp.status_code == 401:
+                logging.warning("Unauthorized. Logging in and retrying...")
+                self._login()
+                continue
 
-        return data
+            if resp.status_code == 200:
+                logging.info("Create application successful")
+                logging.info(resp)
+                return resp.json().get("data", {})
+
+            logging.warning(
+                f"Attempt {attempt}: unexpected status {resp.status_code} — {resp.text}"
+            )
+
+        raise Exception("create_application() failed after all retries")
 
     def update_application(self, jobId, scheduleId, applicationId):
         self.set_headers_with_fresh_tokens()

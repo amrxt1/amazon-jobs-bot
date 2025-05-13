@@ -1,8 +1,17 @@
 from lib.job_poller import JobPoller
 from lib.notifier import Notifier
-import sys
-import time
+from datetime import datetime
+import logging
 import random
+import time
+import sys
+
+logfile = f"logs/ca_jobs_script/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.FileHandler(logfile), logging.StreamHandler()],
+)
 
 
 def run_bot():

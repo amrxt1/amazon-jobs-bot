@@ -1,4 +1,3 @@
-import traceback
 import threading
 import argparse
 import logging
@@ -13,7 +12,7 @@ from lib.job_poller import JobPoller
 from lib.notifier import Notifier
 from datetime import datetime
 
-logfile = f"logs/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+logfile = f"logs/main/run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -143,8 +142,7 @@ def main(region="us"):
                         try:
                             agent.start_timer()
                         except Exception:
-                            logging.exception("Timer Failed")
-                            time.sleep(5)
+                            logging.exception("Start Timer Failed")
 
                         agent.driver.quit()
 

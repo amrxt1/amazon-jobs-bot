@@ -11,5 +11,4 @@ chromedriver
 creds.py
 
 __pycache__/*
-lib/__pycache__/*
 logs/*
