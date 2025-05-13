@@ -224,24 +224,17 @@ class AmazonSession:
         )
         return True
 
-    def create_application(self, jobId, scheduleId, max_retries=5, timeout=11):
+    def aws_authenticated_post_request(
+        self, url, body, caller="caller_name()", max_retries=5, timeout=11
+    ):
         if not self.candidate_id:
             self.set_candidate()
-
-        body = {
-            "jobId": jobId,
-            "dspEnabled": True,
-            "scheduleId": scheduleId,
-            "candidateId": self.candidate_id,
-            "activeApplicationCheckEnabled": True,
-        }
-
         for attempt in range(1, max_retries + 1):
             self.set_headers_with_fresh_tokens()
 
             try:
                 resp = self.session.post(
-                    self.conf["url"][f"create_app_url_{self.region}"],
+                    url=url,
                     json=body,
                     timeout=timeout,
                 )
@@ -263,51 +256,47 @@ class AmazonSession:
                 f"Attempt {attempt}: unexpected status {resp.status_code} — {resp.text}"
             )
 
-        raise Exception("create_application() failed after all retries")
+        raise Exception(f"{caller}() failed after all retries")
 
-    def update_application(self, jobId, scheduleId, applicationId):
-        self.set_headers_with_fresh_tokens()
-        if self.candidate_id is None:
-            self.set_candidate()
+    def create_application(self, jobId, scheduleId, max_retries=5, timeout=11):
+        body = {
+            "jobId": jobId,
+            "dspEnabled": True,
+            "scheduleId": scheduleId,
+            "candidateId": self.candidate_id,
+            "activeApplicationCheckEnabled": True,
+        }
+        return self.aws_authenticated_post_request(
+            self.conf["url"][f"create_app_url_{self.region}"],
+            body=body,
+            caller="create_application",
+        )
 
+    def update_application(
+        self, jobId, scheduleId, applicationId, max_retries=5, timeout=11
+    ):
         body = {
             "applicationId": applicationId,
             "type": "job-confirm",
             "dspEnabled": True,
             "payload": {"jobId": jobId, "scheduleId": scheduleId},
         }
-        resp = self.session.put(
-            self.conf["url"][f"update_app_url_{self.region}"], json=body
+        return self.aws_authenticated_post_request(
+            self.conf["url"][f"update_app_url_{self.region}"],
+            body=body,
+            caller="update_application",
         )
-        resp.raise_for_status()
-
-        logging.info("RESPONSE:\n\n")
-        logging.info(resp)
-
-        data = resp.json().get("data", {})
-
-        return data
 
     def update_workflow(self, applicationId):
-        self.set_headers_with_fresh_tokens()
-        if self.candidate_id is None:
-            self.set_candidate()
-
         body = {
             "applicationId": applicationId,
             "workflowStepName": "general-questions",
         }
-        resp = self.session.put(
-            self.conf["url"][f"update_flow_url_{self.region}"], json=body
+        return self.aws_authenticated_post_request(
+            self.conf["url"][f"update_flow_url_{self.region}"],
+            body=body,
+            caller="update_workflow",
         )
-        resp.raise_for_status()
-
-        logging.info("RESPONSE:\n\n")
-        logging.info(resp)
-
-        data = resp.json().get("data", {})
-
-        return data
 
     def start_timer(self):
         url = self.conf["url"][f"my_applications_{self.region}"]
