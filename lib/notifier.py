@@ -20,9 +20,16 @@ class Notifier:
 
     def notify(self, message):
         url = self.cfg["url"]
-        params = {"chat_id": self.cfg["chat_id"], "text": message}
-        requests.get(url + "/sendMessage", params=params)
-        params = {"chat_id": self.cfg["chat_id_lv"], "text": message}
-        requests.get(url + "/sendMessage", params=params)
-
+        requests.get(
+            url + "/sendMessage",
+            params={"chat_id": self.cfg["chat_id"], "text": message},
+        )
+        requests.get(
+            url + "/sendMessage",
+            params={"chat_id": self.cfg["chat_id_lv"], "text": message},
+        )
+        requests.get(
+            url + "/sendMessage",
+            params={"chat_id": self.cfg["chat_id_am"], "text": message},
+        )
         logging.info(f"NOTIFIER: {message}")

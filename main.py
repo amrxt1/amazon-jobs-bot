@@ -23,7 +23,7 @@ logging.basicConfig(
 )
 
 
-def jittered_sleep(min_s=5, max_s=15):
+def jittered_sleep(min_s=3, max_s=7):
     """Wait a bit before the next poll, to avoid a rigid bot fingerprint."""
     t = random.uniform(min_s, max_s)
     logging.info(f"Sleeping {t:.1f}s before next poll...")
@@ -35,7 +35,11 @@ def _relogin_worker(session, interval_minutes):
     Background loop: sleep for interval_minutes, then re-login & refresh headers.
     """
     while True:
-        time.sleep(interval_minutes * 60)
+        time.sleep((interval_minutes - 5) * 60)
+        session.notifier.notify(
+            "SUMMONS FOR LOGIN HELP...\nRefreshing sessions in 5 minutes"
+        )
+        time.sleep(5 * 60)
         try:
             logging.info(f"{session.login}: refreshing session...")
             session._login()
@@ -84,7 +88,9 @@ def main(region="us"):
 
     try:
         while True:
-            logging.info(f"\n----Polling for new schedules ({region})----")
+            logging.info(
+                f"\n----Polling for new schedules ({region})  (Queue Size: {SESSION_QUEUE.qsize()})----"
+            )
             jobs = poller.get_jobs_us() if (region == "us") else poller.get_jobs_ca()
             for job in jobs:
                 job_id = job["jobId"]
@@ -134,22 +140,29 @@ def main(region="us"):
 
                         # try to update application once created, if not, just move to UI
                         try:
-                            logging.info("***STEP3. Update Application Invoked...")
-                            app = agent.update_application(
+                            logging.info(
+                                f"***STEP3. Update Application with Schedule {s['scheduleId']}..."
+                            )
+                            agent.update_application(
                                 job["jobId"], s["scheduleId"], app["applicationId"]
                             )
-                            logging.info(f"Update Successful!\n{app}")
+                            logging.info("Update Successful!")
 
-                            logging.info("***STEP4. Update Work-flow State")
-                            agent.update_workflow(app["applicationId"])
+                            # logging.info("***STEP4. Update Work-flow State")
+                            # agent.update_workflow(app["applicationId"])
 
-                            logging.info(
-                                f"Reserved.\n***STEP5. Notifying and closing agent for {agent.login}"
-                            )
+                            # logging.info(
+                            #     f"Reserved.\n***STEP5. Notifying and closing agent for {agent.login}"
+                            # )
                         except Exception:
                             logging.exception(
                                 "Application created but unable to Update."
                             )
+
+                        try:
+                            future = executor.submit(agent.start_timer)
+                            timer_futures.append(future)
+                        except Exception:
                             notifier.notify(
                                 "UNABLE TO START UI TIMER\n"
                                 + f"Reserved for {agent.login}\n\n"
@@ -160,12 +173,8 @@ def main(region="us"):
                                     else ""
                                 )
                             )
-
-                        try:
-                            future = executor.submit(agent.start_timer)
-                            timer_futures.append(future)
-                        except Exception:
                             logging.exception("Start Timer Failed")
+                            continue
 
                         notifier.notify(
                             f"Reserved for {agent.login}\n\n"
@@ -193,7 +202,7 @@ if __name__ == "__main__":
     CLI docs.
     """
     parser = argparse.ArgumentParser(
-        prog="amazon-job-picker", description="Reserve Amazon shifts (US or CA)"
+        prog="job-picker", description="Reserve Amazon shifts (US or CA)"
     )
     parser.add_argument(
         "--country",

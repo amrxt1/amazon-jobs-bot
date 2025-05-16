@@ -73,7 +73,7 @@ class AmazonSession:
 
         return driver
 
-    def fetch_amazon_otp(self, imap_conf, since_seconds=120):
+    def fetch_amazon_otp(self, imap_conf, since_seconds=15):
         M = imaplib.IMAP4_SSL(imap_conf["host"], imap_conf["port"])
         M.login(imap_conf["user"], imap_conf["pass"])
         M.select(imap_conf.get("folder", "INBOX"))
@@ -150,29 +150,38 @@ class AmazonSession:
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div/button'
         ).click()
-        logging.info("Approaching OTP...")
-        time.sleep(5)
+
+        # send otp
+        logging.info("Awaiting send OTP button...")
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, '//*[@id="pageRouter"]/div/div/div/button')
+            )
+        )
+        time.sleep(3)
         driver.find_element(
             By.XPATH, '//*[@id="pageRouter"]/div/div/div/button'
         ).click()
 
-        time.sleep(7)
+        logging.info("Awaiting confirm OTP dialog...")
         try:
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 15).until(
                 EC.visibility_of_element_located(
                     (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
                 )
             )
         except Exception:
             logging.exception("Captcha error probably")
+            self.notifier.notify(
+                f"Agent failed during login {self.name} could not get to confirmOtp\nCaptcha error probably"
+            )
 
         otp = self.fetch_amazon_otp(self.imap_conf)
         if otp:
             logging.info(f"****OTP fetched: {otp}")
         else:
-            n = self.notifier
-            n.notify(
-                f"TYPE: LOGIN-HELP\nYou need to enter otp for {self.name} with email: {self.login}"
+            self.notifier.notify(
+                f"You need to manually enter otp for {self.name} with email: {self.login}"
             )
             otp = input("****Couldn’t fetch OTP—please enter manually:\n> ")
 
@@ -314,20 +323,17 @@ class AmazonSession:
         try:
             self.driver.get(url)
             logging.info("Arrived at url, awaiting my jobs to appear")
-            WebDriverWait(self.driver, 15).until(
+            WebDriverWait(self.driver, 200).until(
                 EC.presence_of_element_located(
-                    (
-                        By.XPATH,
-                        '//*[@id="StencilTabPanel-myApplicationTab-active-panel"]/div/div/div/div/div/div[2]/div[8]/button[1]',
-                    )
+                    (By.CSS_SELECTOR, '[data-test-id="activeMyApplicationTabItem"]')
                 )
             )
             logging.info(f"My jobs loaded {url}")
         except Exception:
             logging.exception("Navigation to timer failed")
 
-        logging.info("Awaiting jobs to appear.")
-        WebDriverWait(self.driver, 15).until(
+        logging.info("Awaiting 'Select Shift' button to appear.")
+        WebDriverWait(self.driver, 200).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//*[normalize-space(.)="Select Shift"]')
             )
@@ -337,10 +343,10 @@ class AmazonSession:
         )
 
         select_shift.click()
-        logging.info("Clicked on the job")
+        logging.info("Clicked on Select Shift")
 
         logging.info("Awaiting Schedules to appear.")
-        WebDriverWait(self.driver, 15).until(
+        WebDriverWait(self.driver, 200).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//*[normalize-space(.)="Start Date:"]')
             )
@@ -353,7 +359,7 @@ class AmazonSession:
         logging.info("Clicked on the first schedule")
 
         logging.info("Awaiting select job btn to appear.")
-        WebDriverWait(self.driver, 15).until(
+        WebDriverWait(self.driver, 200).until(
             EC.presence_of_element_located(
                 (By.XPATH, '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button')
             )
