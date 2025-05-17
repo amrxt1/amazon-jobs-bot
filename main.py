@@ -6,9 +6,7 @@ import random
 import queue
 import creds
 import time
-import sys
 from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import wait
 from lib.amazon_session import AmazonSession
 from lib.job_poller import JobPoller
 from lib.notifier import Notifier
@@ -63,9 +61,10 @@ def init_agent(user, notifier, SESSION_QUEUE, region):
     a = AmazonSession(user, notifier=notifier, region=region)
     a._login()
     logging.info(f"Login succesful for: {a.name}")
-    time.sleep(7)
-    a.set_headers_with_fresh_tokens()
-
+    try:
+        a.set_headers_with_fresh_tokens()
+    except Exception:
+        print("Failed headers")
     schedule_relogin(a, interval_minutes=55)
 
     SESSION_QUEUE.put(a)
@@ -143,6 +142,7 @@ def main(region="us"):
                             logging.info(
                                 f"***STEP3. Update Application with Schedule {s['scheduleId']}..."
                             )
+                            logging.info(f"Schedule details:\n{s}")
                             agent.update_application(
                                 job["jobId"], s["scheduleId"], app["applicationId"]
                             )
@@ -178,13 +178,10 @@ def main(region="us"):
 
                         notifier.notify(
                             f"Reserved for {agent.login}\n\n"
-                            f"Reserved {job_id}@{s['scheduleId']}  score={s['score']:.3f} \n"
-                            + (
-                                f"application_id: {app['applicationId']} \ncandidateId: {app['candidateId']}"
-                                if app
-                                else ""
-                            )
+                            f"\tReserved \njobID: {job_id}\nscheduleId: {s['scheduleId']}\nscore={s['score']:.3f} \nlocation: {job['locationName']} \n"
                         )
+
+                        SESSION_QUEUE.put(agent)
                     except Exception as e:
                         logging.exception(f"Agent failed, rotating: {e}")
             jittered_sleep()
@@ -195,7 +192,7 @@ def main(region="us"):
         executor.shutdown(wait=True)
 
 
-THRESHOLD = 0.75
+THRESHOLD = 0.4
 
 if __name__ == "__main__":
     """

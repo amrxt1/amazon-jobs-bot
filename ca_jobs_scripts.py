@@ -29,7 +29,9 @@ def run_bot():
         seconds = int(elapsed % 60)
 
         jobs = jb.get_jobs_ca()
-        print(f"Try: {tries} | Elapsed Time: {minutes}m {seconds}s | RESP: {jobs}\n")
+        logging.info(
+            f"Try: {tries} | Elapsed Time: {minutes}m {seconds}s | RESP: {jobs}\n"
+        )
         # n.notify(f"Try: {tries} | Elapsed Time: {minutes}m {seconds}s | RESPONSE: {jobs}\n")
         if jobs:
             n.notify("Shifta aagia guys")

@@ -12,6 +12,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+import email.utils
 import requests
 import imaplib
 import logging
@@ -73,14 +74,16 @@ class AmazonSession:
 
         return driver
 
-    def fetch_amazon_otp(self, imap_conf, since_seconds=15):
+    def fetch_amazon_otp(self, imap_conf, since_seconds=15, wait_for=3):
+        logging.info("Fetching otp from email...")
+        time.sleep(wait_for)
         M = imaplib.IMAP4_SSL(imap_conf["host"], imap_conf["port"])
         M.login(imap_conf["user"], imap_conf["pass"])
         M.select(imap_conf.get("folder", "INBOX"))
-
-        logging.info("Fetching otp from email...")
         typ, data = M.search(None, '(UNSEEN FROM "no-reply@jobs.amazon.com")')
+        logging.info(f"IMAP response: {typ}")
         if typ != "OK":
+            logging.warning(f"IMAP response: {typ}")
             return None
 
         for num in reversed(data[0].split()):
@@ -165,7 +168,7 @@ class AmazonSession:
 
         logging.info("Awaiting confirm OTP dialog...")
         try:
-            WebDriverWait(driver, 15).until(
+            WebDriverWait(driver, 150).until(
                 EC.visibility_of_element_located(
                     (By.CSS_SELECTOR, '[data-test-id="input-test-id-confirmOtp"]')
                 )
@@ -237,7 +240,13 @@ class AmazonSession:
         return True
 
     def aws_authenticated_request(
-        self, url, body, method, caller="caller_name()", max_retries=5, timeout=11
+        self,
+        url,
+        body,
+        method,
+        caller="caller_function_name",
+        max_retries=5,
+        timeout=11,
     ):
         """
         Imitates an authenticated call to the amazon-hiring backend api
@@ -264,7 +273,7 @@ class AmazonSession:
                 continue
 
             if resp.status_code == 200:
-                logging.info("Create application successful")
+                logging.info(f"{caller}() successful")
                 logging.info(resp)
                 return resp.json().get("data", {})
 
@@ -371,6 +380,7 @@ class AmazonSession:
 
         element.click()
         logging.info("Clicked on the first schedule")
-        logging.info("Run succesful. TImer started!\nClosing driver.")
+        self.notifier.notify(
+            f"Run succesful. TImer started!\nClosing driver for {self.name}."
+        )
         time.sleep(3)
-        self.driver.quit()
