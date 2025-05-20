@@ -84,6 +84,7 @@ def main(region="us"):
 
     logging.info(f"Initialized, queue size: {SESSION_QUEUE.qsize()}")
     logging.info("Ready to go...")
+    input("Allow us, master")
 
     try:
         while True:
@@ -93,33 +94,28 @@ def main(region="us"):
             jobs = poller.get_jobs_us() if (region == "us") else poller.get_jobs_ca()
             for job in jobs:
                 job_id = job["jobId"]
-                scheds = (
+                schedules = (
                     poller.get_job_schedules_us(job_id)
                     if (region == "us")
                     else poller.get_job_schedules_ca(job_id)
                 )
-                if not scheds:
+                preferred = poller.filter_preferred_schedules(schedules)
+
+                if not preferred:
+                    logging.info("No schedules in preferred cities.\n")
                     continue
+                logging.info(f"{len(preferred)} schedules in preferred cities.\n")
 
-                scored = poller.score_schedules(scheds)
-                scored.sort(key=lambda s: s["score"], reverse=True)
-
-                for s in scored:
+                for s in preferred:
                     key = (job_id, s["scheduleId"])
                     if key in seen:
                         continue
                     seen.add(key)
 
-                    logging.info(
-                        f"  {s['scheduleId']:16}  scored: {s['score']:.3f}"
-                        + ("  ← candidate" if s["score"] >= THRESHOLD else "")
-                    )
-
-                    if s["score"] < THRESHOLD:
-                        continue
-
                     try:
                         agent = SESSION_QUEUE.get(timeout=5)
+                        if not agent.check:
+                            continue
                     except queue.Empty:
                         logging.info("No free sessions...exiting")
                         return True
@@ -143,8 +139,10 @@ def main(region="us"):
                                 f"***STEP3. Update Application with Schedule {s['scheduleId']}..."
                             )
                             logging.info(f"Schedule details:\n{s}")
-                            agent.update_application(
-                                job["jobId"], s["scheduleId"], app["applicationId"]
+                            logging.info(
+                                agent.update_application(
+                                    job["jobId"], s["scheduleId"], app["applicationId"]
+                                )
                             )
                             logging.info("Update Successful!")
 
@@ -162,11 +160,12 @@ def main(region="us"):
                         try:
                             future = executor.submit(agent.start_timer)
                             timer_futures.append(future)
+                            agent.check = False
                         except Exception:
                             notifier.notify(
                                 "UNABLE TO START UI TIMER\n"
                                 + f"Reserved for {agent.login}\n\n"
-                                f"Reserved {job_id}@{s['scheduleId']}  score={s['score']:.3f} \n"
+                                f"Reserved {job_id}@{s['scheduleId']}\n"
                                 + (
                                     f"application_id: {app['applicationId']} \ncandidateId: {app['candidateId']}"
                                     if app
@@ -178,7 +177,7 @@ def main(region="us"):
 
                         notifier.notify(
                             f"Reserved for {agent.login}\n\n"
-                            f"\tReserved \njobID: {job_id}\nscheduleId: {s['scheduleId']}\nscore={s['score']:.3f} \nlocation: {job['locationName']} \n"
+                            f"\tReserved \njobID: {job_id}\nscheduleId: {s['scheduleId']}\nlocation: {s['city']} \n"
                         )
 
                         SESSION_QUEUE.put(agent)

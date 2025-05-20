@@ -32,6 +32,8 @@ class AmazonSession:
         self.imap_conf = user["imap"]
         self.notifier = notifier
 
+        self.check = user["check"]
+
         self.conf = self.config()
         self.driver = self.build_driver()
         self.session = requests.Session()
@@ -329,58 +331,69 @@ class AmazonSession:
     def start_timer(self):
         url = self.conf["url"][f"my_applications_{self.region}"]
         logging.info(f"Initiating timer for {self.name}")
+
         try:
-            self.driver.get(url)
-            logging.info("Arrived at url, awaiting my jobs to appear")
+            try:
+                self.driver.get(url)
+                logging.info("Arrived at url, awaiting my jobs to appear")
+                WebDriverWait(self.driver, 200).until(
+                    EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, '[data-test-id="activeMyApplicationTabItem"]')
+                    )
+                )
+                logging.info(f"My jobs loaded {url}")
+            except Exception:
+                logging.exception("Navigation to timer failed")
+
+            logging.info("Awaiting 'Select Shift' button to appear.")
             WebDriverWait(self.driver, 200).until(
                 EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, '[data-test-id="activeMyApplicationTabItem"]')
+                    (By.XPATH, '//*[normalize-space(.)="Select Shift"]')
                 )
             )
-            logging.info(f"My jobs loaded {url}")
+            select_shift = self.driver.find_element(
+                By.XPATH, '//*[normalize-space(.)="Select Shift"]'
+            )
+
+            select_shift.click()
+            logging.info("Clicked on Select Shift")
+
+            logging.info("Awaiting Schedules to appear.")
+            WebDriverWait(self.driver, 200).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, '//*[normalize-space(.)="Start Date:"]')
+                )
+            )
+            logging.info("A schedule appeared")
+            element = self.driver.find_element(
+                By.XPATH, '//*[normalize-space(.)="Start Date:"]'
+            )
+            element.click()
+            logging.info("Clicked on the first schedule")
+
+            logging.info("Awaiting select job btn to appear.")
+            WebDriverWait(self.driver, 200).until(
+                EC.presence_of_element_located(
+                    (
+                        By.XPATH,
+                        '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button',
+                    )
+                )
+            )
+            logging.info("btn appeared")
+            element = self.driver.find_element(
+                By.XPATH, '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button'
+            )
+
+            element.click()
+            logging.info("Clicked on the first schedule")
+            self.notifier.notify(
+                f"Run succesful. TImer started!\nClosing driver for {self.name}."
+            )
+            self.check = False
+            time.sleep(3)
         except Exception:
-            logging.exception("Navigation to timer failed")
-
-        logging.info("Awaiting 'Select Shift' button to appear.")
-        WebDriverWait(self.driver, 200).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//*[normalize-space(.)="Select Shift"]')
+            logging.exception(
+                f"Unable to Navigate to timer for {self.name} {self.login}"
             )
-        )
-        select_shift = self.driver.find_element(
-            By.XPATH, '//*[normalize-space(.)="Select Shift"]'
-        )
-
-        select_shift.click()
-        logging.info("Clicked on Select Shift")
-
-        logging.info("Awaiting Schedules to appear.")
-        WebDriverWait(self.driver, 200).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//*[normalize-space(.)="Start Date:"]')
-            )
-        )
-        logging.info("A schedule appeared")
-        element = self.driver.find_element(
-            By.XPATH, '//*[normalize-space(.)="Start Date:"]'
-        )
-        element.click()
-        logging.info("Clicked on the first schedule")
-
-        logging.info("Awaiting select job btn to appear.")
-        WebDriverWait(self.driver, 200).until(
-            EC.presence_of_element_located(
-                (By.XPATH, '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button')
-            )
-        )
-        logging.info("btn appeared")
-        element = self.driver.find_element(
-            By.XPATH, '//*[@id="root"]/div[1]/div/div/main/div/div/div[4]/button'
-        )
-
-        element.click()
-        logging.info("Clicked on the first schedule")
-        self.notifier.notify(
-            f"Run succesful. TImer started!\nClosing driver for {self.name}."
-        )
-        time.sleep(3)
+            self.check = True

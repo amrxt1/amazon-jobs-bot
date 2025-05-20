@@ -11,6 +11,27 @@ from datetime import date
 import requests
 import logging
 
+PREFERRED_CITIES = [
+    # ON
+    "toronto",
+    "scarborough",
+    "hamilton",
+    "concord",
+    "ottawa",
+    "barrhaven",
+    # BC
+    "vancouver",
+    "delta",
+    "surrey",
+    "burnaby",
+    "pitt meadows",
+    "langley"
+    # AB
+    "edmonton",
+    # testdata
+    "anchorage",
+]
+
 
 class JobPoller:
     def __init__(self):
@@ -330,3 +351,10 @@ class JobPoller:
             scored.append({**s, "score": score})
 
         return scored
+
+    def filter_preferred_schedules(self, schedules):
+        return [
+            s
+            for s in schedules
+            if (s.get("city") or "").lower() in [c for c in PREFERRED_CITIES]
+        ]

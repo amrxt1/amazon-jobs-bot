@@ -24,12 +24,12 @@ class Notifier:
             url + "/sendMessage",
             params={"chat_id": self.cfg["chat_id"], "text": message},
         )
-        requests.get(
-            url + "/sendMessage",
-            params={"chat_id": self.cfg["chat_id_lv"], "text": message},
-        )
-        requests.get(
-            url + "/sendMessage",
-            params={"chat_id": self.cfg["chat_id_am"], "text": message},
-        )
+        # requests.get(
+        #     url + "/sendMessage",
+        #     params={"chat_id": self.cfg["chat_id_lv"], "text": message},
+        # )
+        # requests.get(
+        #     url + "/sendMessage",
+        #     params={"chat_id": self.cfg["chat_id_am"], "text": message},
+        # )
         logging.info(f"NOTIFIER: {message}")
